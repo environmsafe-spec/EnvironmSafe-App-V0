@@ -1,2 +1,0 @@
--keep class com.environmsafe.** { *; }
--dontwarn com.environmsafe.**
