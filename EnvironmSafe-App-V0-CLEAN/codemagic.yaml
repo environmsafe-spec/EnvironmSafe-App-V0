@@ -1,0 +1,31 @@
+workflows:
+  android-workflow:
+    name: Android Workflow
+    max_build_duration: 120
+    scripts:
+      - name: Set Android SDK location
+        script: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+      - name: Download Gradle
+        script: |
+          cd /tmp
+          rm -rf gradle-8.1*
+          wget -q https://services.gradle.org/distributions/gradle-8.1-bin.zip
+          unzip -q gradle-8.1-bin.zip
+          export PATH="/tmp/gradle-8.1/bin:$PATH"
+          gradle --version
+      - name: Build APK
+        script: |
+          export PATH="/tmp/gradle-8.1/bin:$PATH"
+          cd $GITHUB_WORKSPACE
+          gradle assembleRelease
+    artifacts:
+      - app/build/outputs/**/*.apk
+      - app/build/outputs/**/*.aab
+    publishing:
+      email:
+        recipients:
+          - support@environmsafe.com
+        notify:
+          success: true
+          failure: true
