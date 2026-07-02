@@ -14,10 +14,10 @@ workflows:
           unzip -q gradle-8.1-bin.zip
           export PATH="/tmp/gradle-8.1/bin:$PATH"
           gradle --version
+          cd -
       - name: Build APK
         script: |
           export PATH="/tmp/gradle-8.1/bin:$PATH"
-          cd $GITHUB_WORKSPACE
           gradle assembleRelease
     artifacts:
       - app/build/outputs/**/*.apk
