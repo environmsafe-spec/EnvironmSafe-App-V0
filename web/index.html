@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>EnvironmSafe V0 — Procurement Management System</title>
+<meta name="description" content="EnvironmSafe V0: the Android procurement management app — download the APK and read the build spec." />
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; }
+
+  :root {
+    --ground:   #F4F6F8;
+    --surface:  #FFFFFF;
+    --ink:      #131A2A;
+    --muted:    #5C6579;
+    --line:     #DFE3EA;
+    --navy:     #1A2744;
+    --navy-ink: #F2F5FA;
+    --gold:     #E8A317;
+    --gold-ink: #6B4A00;
+    --shadow:   0 1px 2px rgba(19, 26, 42, .06), 0 8px 24px rgba(19, 26, 42, .06);
+
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:   #0D1220;
+      --surface:  #151D2E;
+      --ink:      #E8EBF1;
+      --muted:    #96A1B7;
+      --line:     #263148;
+      --navy:     #101827;
+      --navy-ink: #EDF1F8;
+      --gold:     #F2B23F;
+      --gold-ink: #2A1D00;
+      --shadow:   0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .3);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:   #0D1220;
+    --surface:  #151D2E;
+    --ink:      #E8EBF1;
+    --muted:    #96A1B7;
+    --line:     #263148;
+    --navy:     #101827;
+    --navy-ink: #EDF1F8;
+    --gold:     #F2B23F;
+    --gold-ink: #2A1D00;
+    --shadow:   0 1px 2px rgba(0, 0, 0, .4), 0 8px 24px rgba(0, 0, 0, .3);
+  }
+
+  :root[data-theme="light"] {
+    --ground:   #F4F6F8;
+    --surface:  #FFFFFF;
+    --ink:      #131A2A;
+    --muted:    #5C6579;
+    --line:     #DFE3EA;
+    --navy:     #1A2744;
+    --navy-ink: #F2F5FA;
+    --gold:     #E8A317;
+    --gold-ink: #6B4A00;
+    --shadow:   0 1px 2px rgba(19, 26, 42, .06), 0 8px 24px rgba(19, 26, 42, .06);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+  }
+
+  .wrap { max-width: 60rem; margin: 0 auto; padding: 0 1.5rem; }
+
+  /* ---- identity band: the app's launch screen, on the web ---- */
+  .band {
+    background: var(--navy);
+    color: var(--navy-ink);
+    border-bottom: 3px solid var(--gold);
+  }
+  .band .wrap {
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    padding-top: 4rem;
+    padding-bottom: 4rem;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .75rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+  .wordmark {
+    margin: 0;
+    font-size: clamp(2.25rem, 7vw, 3.5rem);
+    font-weight: 700;
+    letter-spacing: -.025em;
+    line-height: 1.05;
+    text-wrap: balance;
+  }
+  .tagline {
+    margin: 0;
+    font-size: clamp(1rem, 2.5vw, 1.25rem);
+    color: var(--gold);
+    font-weight: 500;
+  }
+
+  /* ---- main layout ---- */
+  main { padding: 3rem 0 1rem; }
+  .cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: 2.5rem;
+    align-items: start;
+  }
+  @media (max-width: 46rem) {
+    .cols { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
+  }
+
+  .prose { display: flex; flex-direction: column; gap: 1.75rem; max-width: 40rem; }
+  .prose h2 {
+    margin: 0 0 .5rem;
+    font-size: 1.25rem;
+    font-weight: 650;
+    letter-spacing: -.01em;
+  }
+  .prose p { margin: 0 0 .75rem; }
+  .prose p:last-child { margin-bottom: 0; }
+  .prose a { color: inherit; text-underline-offset: .2em; text-decoration-color: var(--gold); }
+
+  .steps {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+  }
+  .steps li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 1.75rem minmax(0, 1fr);
+    gap: .75rem;
+    align-items: baseline;
+  }
+  .steps li::before {
+    content: counter(step, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: .8125rem;
+    color: var(--gold);
+  }
+
+  /* ---- build card ---- */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    box-shadow: var(--shadow);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    position: sticky;
+    top: 1.5rem;
+  }
+  @media (max-width: 46rem) { .card { position: static; } }
+
+  .card h2 {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: .75rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .download {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .5rem;
+    background: var(--gold);
+    color: var(--gold-ink);
+    font-weight: 650;
+    font-size: 1rem;
+    text-decoration: none;
+    padding: .85rem 1.25rem;
+    border-radius: 3px;
+    transition: filter .15s ease, transform .15s ease;
+  }
+  .download:hover { filter: brightness(1.06); }
+  .download:active { transform: translateY(1px); }
+  .download:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  .download small {
+    display: block;
+    font-family: var(--mono);
+    font-size: .6875rem;
+    font-weight: 400;
+    letter-spacing: .04em;
+    opacity: .8;
+  }
+
+  .spec { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .5rem 1rem; }
+  .spec dt {
+    font-family: var(--mono);
+    font-size: .75rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    line-height: 1.9;
+  }
+  .spec dd {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: .8125rem;
+    line-height: 1.9;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+
+  .note {
+    margin: 0;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--line);
+    font-size: .8125rem;
+    color: var(--muted);
+  }
+  .note a { color: inherit; }
+
+  footer {
+    margin-top: 3rem;
+    border-top: 1px solid var(--line);
+    padding: 1.5rem 0 3rem;
+    font-size: .8125rem;
+    color: var(--muted);
+  }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; justify-content: space-between; }
+  footer a { color: inherit; }
+  .stamp { font-family: var(--mono); letter-spacing: .04em; }
+</style>
+</head>
+<body>
+
+<header class="band">
+  <div class="wrap">
+    <p class="eyebrow">Version 0 · Android</p>
+    <h1 class="wordmark">EnvironmSafe</h1>
+    <p class="tagline">Procurement Management System</p>
+  </div>
+</header>
+
+<main>
+  <div class="wrap cols">
+
+    <div class="prose">
+      <section>
+        <h2>What this build is</h2>
+        <p>
+          EnvironmSafe V0 is the first Android build of the procurement management
+          system — the app shell, packaged and installable. It launches to the
+          identity screen shown above; the procurement modules are not wired in yet.
+        </p>
+        <p>
+          Treat it as the foundation to build on: the package name, launcher entry,
+          theme and build pipeline are fixed from here, so every later release
+          upgrades this same app rather than replacing it.
+        </p>
+      </section>
+
+      <section>
+        <h2>Installing it on a phone</h2>
+        <ol class="steps">
+          <li>Open this page on the Android device and tap <strong>Download the APK</strong>.</li>
+          <li>Android will warn that the file can harm your device — that warning appears for every app installed outside the Play Store. Choose <strong>Download anyway</strong>.</li>
+          <li>Open the downloaded file. If prompted, allow your browser or file manager to install unknown apps, then return and confirm.</li>
+          <li>Tap <strong>Install</strong>, then <strong>Open</strong>. EnvironmSafe appears in your app drawer.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Where the build comes from</h2>
+        <p>
+          Every APK is compiled by the <code>Android APK</code> workflow in the
+          repository — not on anyone's laptop — so the download always matches the
+          committed source. Pushing to <code>main</code> rebuilds it; publishing a
+          tag attaches the APKs to a release.
+        </p>
+      </section>
+    </div>
+
+    <aside class="card">
+      <h2>Android build</h2>
+
+      <a class="download" href="https://github.com/environmsafe-spec/EnvironmSafe-App-V0/releases/latest/download/EnvironmSafe-v0-debug.apk">
+        Download the APK
+        <small>.APK · ANDROID 9+</small>
+      </a>
+
+      <dl class="spec">
+        <dt>Version</dt><dd>1.0.0 (code 1)</dd>
+        <dt>Package</dt><dd>com.environmsafe.app</dd>
+        <dt>Requires</dt><dd>Android 9.0 · API 28</dd>
+        <dt>Targets</dt><dd>Android 14 · API 34</dd>
+        <dt>Built with</dt><dd>AGP 8.1 · Kotlin 1.9</dd>
+      </dl>
+
+      <p class="note">
+        Releases also carry an unsigned release APK. That file is for signing with a
+        production keystore — it cannot be installed directly. See
+        <a href="https://github.com/environmsafe-spec/EnvironmSafe-App-V0/releases/latest">all release files</a>.
+      </p>
+    </aside>
+
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>EnvironmSafe · Procurement Management System</span>
+    <span class="stamp"><a href="https://github.com/environmsafe-spec/EnvironmSafe-App-V0">environmsafe-spec/EnvironmSafe-App-V0</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

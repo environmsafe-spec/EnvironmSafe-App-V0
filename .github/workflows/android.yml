@@ -1,0 +1,80 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish the APKs to a GitHub release under this tag (blank = build only)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-34 build-tools;34.0.0 platform-tools"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.1"
+
+      - name: Build debug and release APKs
+        run: gradle --no-daemon assembleDebug assembleRelease
+
+      - name: Collect APKs
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk \
+             dist/EnvironmSafe-v0-debug.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk \
+             dist/EnvironmSafe-v0-release-unsigned.apk
+          ls -lh dist
+
+      - name: Upload APKs as build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: EnvironmSafe-APK
+          path: dist/*.apk
+          if-no-files-found: error
+
+      - name: Publish release
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ inputs.release_tag }}"
+          notes="EnvironmSafe V0 — Procurement Management System.
+
+          \`EnvironmSafe-v0-debug.apk\` is the installable build: download it on an
+          Android 9 (API 28) or newer device and allow installs from your browser.
+
+          \`EnvironmSafe-v0-release-unsigned.apk\` is unsigned and cannot be installed
+          until it is signed with a release keystore.
+
+          Built from ${GITHUB_SHA} by the Android APK workflow."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/*.apk --clobber
+          else
+            gh release create "$tag" dist/*.apk \
+              --title "EnvironmSafe V0 ($tag)" \
+              --notes "$notes"
+          fi
