@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">EnvironmSafe</string>
+    <string name="share_file">Share file</string>
+    <string name="saved_to">Saved to %1$s</string>
+    <string name="save_failed">Could not save the file: %1$s</string>
+    <string name="no_file_app">No file manager found on this device.</string>
 </resources>

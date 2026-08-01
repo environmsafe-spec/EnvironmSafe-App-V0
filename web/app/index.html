@@ -1,0 +1,1385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>EnvironmSafe — Procurement &amp; Finance</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; }
+
+  :root {
+    --ground:#F4F6F8; --surface:#FFFFFF; --raised:#FAFBFC;
+    --ink:#131A2A; --ink-2:#3D4658; --muted:#5C6579; --line:#DFE3EA; --line-2:#EEF1F5;
+    --navy:#1A2744; --navy-ink:#F2F5FA; --gold:#E8A317; --gold-ink:#5A3E00;
+    --s-good:#1E7A4B; --s-warn:#9A6B00; --s-crit:#B02020; --s-info:#0E5E86;
+    --c-1:#0E7FA3; --c-2:#E8A317;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --shadow:0 1px 2px rgba(19,26,42,.06), 0 8px 24px rgba(19,26,42,.07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#0D1220; --surface:#151D2E; --raised:#1A2436;
+      --ink:#E8EBF1; --ink-2:#C3CAD8; --muted:#96A1B7; --line:#263148; --line-2:#1E2739;
+      --navy:#101827; --navy-ink:#EDF1F8; --gold:#F2B23F; --gold-ink:#241800;
+      --s-good:#4BBE85; --s-warn:#E0B54A; --s-crit:#F08A8A; --s-info:#5EB6D8;
+      --c-1:#0E7FA3; --c-2:#C08A1C;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.32);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0D1220; --surface:#151D2E; --raised:#1A2436;
+    --ink:#E8EBF1; --ink-2:#C3CAD8; --muted:#96A1B7; --line:#263148; --line-2:#1E2739;
+    --navy:#101827; --navy-ink:#EDF1F8; --gold:#F2B23F; --gold-ink:#241800;
+    --s-good:#4BBE85; --s-warn:#E0B54A; --s-crit:#F08A8A; --s-info:#5EB6D8;
+    --c-1:#0E7FA3; --c-2:#C08A1C;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.32);
+  }
+  :root[data-theme="light"] {
+    --ground:#F4F6F8; --surface:#FFFFFF; --raised:#FAFBFC;
+    --ink:#131A2A; --ink-2:#3D4658; --muted:#5C6579; --line:#DFE3EA; --line-2:#EEF1F5;
+    --navy:#1A2744; --navy-ink:#F2F5FA; --gold:#E8A317; --gold-ink:#5A3E00;
+    --s-good:#1E7A4B; --s-warn:#9A6B00; --s-crit:#B02020; --s-info:#0E5E86;
+    --c-1:#0E7FA3; --c-2:#E8A317;
+    --shadow:0 1px 2px rgba(19,26,42,.06), 0 8px 24px rgba(19,26,42,.07);
+  }
+
+  body { background:var(--ground); color:var(--ink); font-family:var(--sans); font-size:15px; line-height:1.5; }
+  h1,h2,h3 { margin:0; font-weight:650; letter-spacing:-.01em; }
+  a { color:inherit; }
+
+  /* ---------- app frame ---------- */
+  .topbar {
+    background:var(--navy); color:var(--navy-ink);
+    display:flex; align-items:center; gap:.75rem; padding:.6rem .9rem;
+    border-bottom:3px solid var(--gold); position:sticky; top:0; z-index:30;
+  }
+  .brand { display:flex; align-items:center; gap:.6rem; min-width:0; flex:1 1 auto; }
+  .logo {
+    width:34px; height:34px; border-radius:3px; flex:none;
+    background:var(--gold); color:var(--navy);
+    display:grid; place-items:center; font-weight:800; font-size:.85rem; letter-spacing:-.03em;
+    background-size:cover; background-position:center;
+  }
+  .brand-txt { min-width:0; }
+  .brand-txt b { display:block; font-size:.95rem; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .brand-txt span { display:block; font-size:.68rem; color:var(--gold); font-family:var(--mono);
+    letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .topbar .spacer { flex:0 0 auto; }
+  .topbar select, .topbar button {
+    background:rgba(255,255,255,.1); color:var(--navy-ink); border:1px solid rgba(255,255,255,.22);
+    border-radius:3px; padding:.35rem .5rem; font:inherit; font-size:.8rem; cursor:pointer;
+    flex:0 0 auto; width:auto; max-width:9rem;
+  }
+  .topbar select option { color:#131A2A; background:#fff; }
+
+  .shell { display:grid; grid-template-columns:216px minmax(0,1fr); align-items:start; }
+  @media (max-width:56rem){ .shell{ grid-template-columns:minmax(0,1fr); } }
+
+  nav.side { position:sticky; top:57px; padding:.75rem .5rem; border-right:1px solid var(--line); background:var(--surface); min-height:calc(100vh - 57px); }
+  @media (max-width:56rem){
+    nav.side { position:static; min-height:0; border-right:0; border-bottom:1px solid var(--line);
+      display:flex; gap:.35rem; overflow-x:auto; padding:.5rem; }
+    nav.side .navgroup { display:flex; gap:.35rem; }
+    nav.side .navlabel { display:none; }
+  }
+  .navlabel { font-family:var(--mono); font-size:.65rem; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); padding:.75rem .6rem .3rem; }
+  .navbtn {
+    display:block; width:100%; text-align:start; background:none; border:0; color:var(--ink-2);
+    font:inherit; font-size:.875rem; padding:.45rem .6rem; border-radius:3px; cursor:pointer; white-space:nowrap;
+  }
+  .navbtn:hover { background:var(--line-2); color:var(--ink); }
+  .navbtn[aria-current="true"] { background:var(--navy); color:var(--navy-ink); font-weight:600; }
+  .navbtn:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--c-1); outline-offset:2px; }
+
+  main { padding:1.1rem 1.1rem 4rem; min-width:0; }
+  .page-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:.5rem 1rem; margin-bottom:1rem; }
+  .page-head h1 { font-size:1.35rem; }
+  .page-head .sub { color:var(--muted); font-size:.85rem; }
+  .page-head .grow { flex:1; }
+
+  /* ---------- controls ---------- */
+  .btn {
+    background:var(--navy); color:var(--navy-ink); border:1px solid var(--navy);
+    border-radius:3px; padding:.5rem .85rem; font:inherit; font-size:.85rem; font-weight:600; cursor:pointer;
+  }
+  .btn:hover { filter:brightness(1.12); }
+  .btn.gold { background:var(--gold); border-color:var(--gold); color:var(--gold-ink); }
+  .btn.ghost { background:transparent; color:var(--ink); border-color:var(--line); font-weight:500; }
+  .btn.ghost:hover { background:var(--line-2); filter:none; }
+  .btn.sm { padding:.3rem .55rem; font-size:.78rem; }
+  .btn[disabled] { opacity:.45; cursor:not-allowed; filter:none; }
+
+  .field { display:flex; flex-direction:column; gap:.25rem; min-width:0; }
+  .field > label { font-size:.72rem; font-weight:600; color:var(--muted); letter-spacing:.04em; text-transform:uppercase; }
+  .field > label .ar { font-weight:400; text-transform:none; letter-spacing:0; opacity:.85; }
+  input, select, textarea {
+    font:inherit; font-size:.875rem; color:var(--ink); background:var(--surface);
+    border:1px solid var(--line); border-radius:3px; padding:.45rem .5rem; width:100%; min-width:0;
+  }
+  textarea { resize:vertical; min-height:2.4rem; }
+  .grid { display:grid; gap:.7rem; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+  .toolbar { display:flex; flex-wrap:wrap; gap:.5rem; align-items:end; margin-bottom:.9rem; }
+  .toolbar .field { flex:1 1 150px; }
+
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:4px; box-shadow:var(--shadow); padding:1rem; }
+  .card + .card { margin-top:1rem; }
+  .card > h2 { font-size:1rem; margin-bottom:.75rem; }
+  .card-note { font-size:.8rem; color:var(--muted); }
+
+  /* ---------- tables ---------- */
+  .tablewrap { overflow-x:auto; border:1px solid var(--line); border-radius:4px; background:var(--surface); }
+  table { border-collapse:collapse; width:100%; font-size:.83rem; }
+  th, td { padding:.45rem .6rem; text-align:start; border-bottom:1px solid var(--line-2); white-space:nowrap; }
+  th { background:var(--raised); font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600; position:sticky; top:0; }
+  td.num, th.num { text-align:end; font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  tbody tr:hover { background:var(--line-2); }
+  tfoot td { font-weight:700; background:var(--raised); border-top:2px solid var(--line); }
+  .empty { padding:1.5rem; text-align:center; color:var(--muted); font-size:.85rem; }
+
+  .pill { display:inline-block; padding:.1rem .45rem; border-radius:10px; font-size:.68rem; font-weight:700;
+          letter-spacing:.03em; border:1px solid currentColor; }
+  .pill.draft{ color:var(--muted); } .pill.approved{ color:var(--s-info); }
+  .pill.paid{ color:var(--s-good); } .pill.closed{ color:var(--ink-2); } .pill.cancelled{ color:var(--s-crit); }
+
+  /* ---------- KPIs ---------- */
+  .kpis { display:grid; gap:.7rem; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); }
+  .kpi { background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:.7rem .8rem; }
+  .kpi .k { font-family:var(--mono); font-size:.65rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+  .kpi .v { font-size:1.35rem; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.02em; margin-top:.15rem; }
+  .kpi .n { font-size:.72rem; color:var(--muted); }
+  .kpi.good .v { color:var(--s-good); } .kpi.crit .v { color:var(--s-crit); }
+
+  /* ---------- chart ---------- */
+  .chart { width:100%; overflow-x:auto; }
+  .chart svg { display:block; min-width:520px; }
+  .legend { display:flex; gap:1rem; flex-wrap:wrap; font-size:.78rem; color:var(--ink-2); margin-bottom:.5rem; }
+  .legend i { width:10px; height:10px; border-radius:2px; display:inline-block; margin-inline-end:.35rem; }
+
+  /* ---------- modal ---------- */
+  .modal-bg { position:fixed; inset:0; background:rgba(10,14,24,.55); display:grid; place-items:center; padding:1rem; z-index:50; }
+  .modal { background:var(--surface); border:1px solid var(--line); border-radius:5px; box-shadow:var(--shadow);
+           width:min(700px,100%); max-height:88vh; overflow:auto; padding:1.1rem; }
+  .modal h2 { font-size:1.05rem; margin-bottom:.9rem; }
+  .modal .actions { display:flex; gap:.5rem; justify-content:flex-end; margin-top:1rem; }
+
+  .toast { position:fixed; inset-inline-end:1rem; bottom:1rem; background:var(--navy); color:var(--navy-ink);
+           padding:.6rem .9rem; border-radius:4px; font-size:.85rem; box-shadow:var(--shadow); z-index:60; }
+
+  .rowactions { display:flex; gap:.3rem; }
+  .linkbtn { background:none; border:0; color:var(--c-1); font:inherit; font-size:.8rem; cursor:pointer; padding:.15rem .3rem; text-decoration:underline; }
+
+  /* ---------- print ---------- */
+  .printhead { display:none; }
+  @media print {
+    .topbar, nav.side, .toolbar, .noprint { display:none !important; }
+    .shell { display:block; }
+    main { padding:0; }
+    body { background:#fff; color:#000; font-size:11px; }
+    .card, .tablewrap { border:0; box-shadow:none; }
+    .printhead { display:flex; align-items:center; gap:.75rem; border-bottom:2px solid #1A2744; padding-bottom:.4rem; margin-bottom:.6rem; }
+    .printhead .logo { background:#E8A317; color:#1A2744; }
+    th { background:#eee !important; color:#000; }
+    tbody tr:hover { background:none; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo" id="logoBox">ES</div>
+    <div class="brand-txt">
+      <b id="coName">EnvironmSafe</b>
+      <span id="coTag">Procurement &amp; Finance</span>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <select id="roleSel" title="User role"></select>
+  <select id="langSel" title="Language">
+    <option value="en">EN</option>
+    <option value="ar">ع</option>
+  </select>
+</header>
+
+<div class="shell">
+  <nav class="side" id="nav"></nav>
+  <main id="main"></main>
+</div>
+
+<script>
+"use strict";
+
+/* =========================================================================
+   EnvironmSafe — Procurement & Financial Management
+   Single-file application. Storage: browser localStorage (works offline,
+   identical inside the Android APK and on the website).
+   ========================================================================= */
+
+const COMPANY = {
+  name: "EnvironmSafe for Engineering, Trading, and Services Ltd.",
+  nameAr: "إنفايرومسيف للهندسة والتجارة والخدمات المحدودة",
+  address: "Aden",
+  web: "www.environmsafe.com",
+  email: "support@environmsafe.com",
+  phone: "783402932",
+  currency: "YER",
+  // Replace with a data URI of the company logo (see README) to brand the app,
+  // reports and print-outs. Empty string falls back to the "ES" monogram.
+  logo: ""
+};
+
+const DB_KEY = "environmsafe.db.v2";
+
+/* ---------- reference data ---------- */
+
+const PHASES = [
+  "RFQ IN","RFQ OUT","QUOTATION IN","QUOTATION OUT",
+  "PO IN","PO OUT","INVOICE IN","INVOICE OUT","PAYMENT","OTHER"
+];
+
+// side: which column the amount lands in (the company's stated Debit/Credit rule)
+// flow: how reports read the row.  party: which master the row belongs to.
+const TXTYPES = [
+  { v:"RFQ IN",         ar:"طلب عرض سعر وارد",  phase:"RFQ IN",         party:"customer", fin:false },
+  { v:"RFQ OUT",        ar:"طلب عرض سعر صادر",  phase:"RFQ OUT",        party:"supplier", fin:false },
+  { v:"QUOTATION IN",   ar:"عرض سعر وارد",      phase:"QUOTATION IN",   party:"supplier", fin:false },
+  { v:"QUOTATION OUT",  ar:"عرض سعر صادر",      phase:"QUOTATION OUT",  party:"customer", fin:false },
+  { v:"PO IN",          ar:"أمر شراء وارد",     phase:"PO IN",          party:"customer", fin:false },
+  { v:"PO OUT",         ar:"أمر شراء صادر",     phase:"PO OUT",         party:"supplier", fin:false },
+  { v:"INVOICE OUT",    ar:"فاتورة مبيعات",     phase:"INVOICE OUT",    party:"customer", fin:true, side:"credit", flow:"revenue" },
+  { v:"INVOICE IN",     ar:"فاتورة مشتريات",    phase:"INVOICE IN",     party:"supplier", fin:true, side:"debit",  flow:"cost" },
+  { v:"RECEIPT",        ar:"سند قبض",           phase:"PAYMENT",        party:"customer", fin:true, side:"credit", flow:"cash_in",  cash:true },
+  { v:"PAYMENT OUT",    ar:"سند صرف",           phase:"PAYMENT",        party:"supplier", fin:true, side:"debit",  flow:"cash_out", cash:true },
+  { v:"EXPENSE",        ar:"مصروف",             phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cost_cash_out", cash:true },
+  { v:"SALARY",         ar:"راتب",              phase:"OTHER",          party:"employee", fin:true, side:"debit",  flow:"cost_cash_out", cash:true },
+  { v:"ADVANCE TO EMPLOYEE", ar:"سلفة موظف",    phase:"OTHER",          party:"employee", fin:true, side:"debit",  flow:"cash_out", cash:true },
+  { v:"LOAN IN",        ar:"قرض/دين وارد",      phase:"OTHER",          party:"none",     fin:true, side:"credit", flow:"cash_in",  cash:true },
+  { v:"LOAN OUT",       ar:"قرض/دين صادر",      phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cash_out", cash:true },
+  { v:"OTHER",          ar:"أخرى",              phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"other" }
+];
+const typeOf = v => TXTYPES.find(t => t.v === v) || TXTYPES[TXTYPES.length-1];
+
+const STATUSES = ["Draft","Approved","Paid","Closed","Cancelled"];
+const ROLES = ["Data Entry","Reviewer","Manager"];
+const DOCTYPES = ["RFQ","Quotation","Purchase Order","Invoice","Receipt","Delivery Note","Contract","Bank Slip","Other"];
+
+/* ---------- master-table schemas (drive the generic CRUD screens) ---------- */
+
+const SCHEMAS = {
+  customers: { prefix:"CUS", en:"Customers", ar:"العملاء", fields:[
+    {k:"nameEn", l:"Name (English)", req:true}, {k:"nameAr", l:"Name (Arabic)"},
+    {k:"contact", l:"Contact person"}, {k:"phone", l:"Phone"}, {k:"email", l:"Email"},
+    {k:"address", l:"Address"}, {k:"opening", l:"Opening balance (owed to us)", t:"number"},
+    {k:"notes", l:"Notes", t:"textarea"} ], cols:["nameEn","phone","email","address"] },
+
+  suppliers: { prefix:"SUP", en:"Suppliers", ar:"الموردون", fields:[
+    {k:"nameEn", l:"Name (English)", req:true}, {k:"nameAr", l:"Name (Arabic)"},
+    {k:"contact", l:"Contact person"}, {k:"phone", l:"Phone"}, {k:"email", l:"Email"},
+    {k:"address", l:"Address"}, {k:"opening", l:"Opening balance (we owe)", t:"number"},
+    {k:"notes", l:"Notes", t:"textarea"} ], cols:["nameEn","phone","email","address"] },
+
+  employees: { prefix:"EMP", en:"Employees", ar:"الموظفون", fields:[
+    {k:"nameEn", l:"Name (English)", req:true}, {k:"nameAr", l:"Name (Arabic)"},
+    {k:"position", l:"Position"}, {k:"phone", l:"Phone"},
+    {k:"salary", l:"Monthly salary", t:"number"}, {k:"notes", l:"Notes", t:"textarea"} ],
+    cols:["nameEn","position","phone","salary"] },
+
+  projects: { prefix:"PRJ", en:"Projects", ar:"المشاريع", fields:[
+    {k:"nameEn", l:"Project name (English)", req:true}, {k:"nameAr", l:"Project name (Arabic)"},
+    {k:"customerId", l:"Customer", t:"ref", ref:"customers"},
+    {k:"kind", l:"Type", t:"select", opts:["Goods supply","Services","Works","Mixed"]},
+    {k:"status", l:"Status", t:"select", opts:["Open","On hold","Completed","Cancelled"]},
+    {k:"budget", l:"Contract value", t:"number"}, {k:"notes", l:"Notes", t:"textarea"} ],
+    cols:["nameEn","customerId","kind","status","budget"] },
+
+  accounts: { prefix:"ACC", en:"Bank & Cash accounts", ar:"الحسابات البنكية والنقدية", fields:[
+    {k:"nameEn", l:"Account name", req:true}, {k:"nameAr", l:"Account name (Arabic)"},
+    {k:"kind", l:"Type", t:"select", opts:["Bank","Cash","Visa card","Wallet"]},
+    {k:"bank", l:"Bank", t:"select", opts:["Tadhamon","Al Quataibi","Al Kuraimi","Other","—"]},
+    {k:"number", l:"Account / card number"},
+    {k:"currency", l:"Currency", t:"select", opts:["YER","USD","SAR","AED"]},
+    {k:"opening", l:"Opening balance", t:"number"}, {k:"notes", l:"Notes", t:"textarea"} ],
+    cols:["nameEn","kind","bank","currency","opening"] },
+
+  categories: { prefix:"CAT", en:"Expense categories", ar:"بنود المصروفات", fields:[
+    {k:"nameEn", l:"Category (English)", req:true}, {k:"nameAr", l:"Category (Arabic)"},
+    {k:"kind", l:"Group", t:"select", opts:["Operations","Marketing","Salaries","Logistics","Government","Finance","Other"]},
+    {k:"notes", l:"Notes", t:"textarea"} ], cols:["nameEn","kind"] }
+};
+
+/* ---------- bilingual UI strings ---------- */
+
+const T = {
+  dashboard:["Dashboard","لوحة المعلومات"], daily:["Daily entry","الإدخال اليومي"],
+  ledger:["Transactions","الحركات"], cases:["Procurement files","ملفات المشتريات"],
+  masters:["Master data","البيانات الأساسية"], reports:["Reports","التقارير"],
+  data:["Backup & sync","النسخ والمزامنة"],
+  customers:["Customers","العملاء"], suppliers:["Suppliers","الموردون"],
+  employees:["Employees","الموظفون"], projects:["Projects","المشاريع"],
+  accounts:["Bank & cash","البنوك والنقد"], categories:["Expense categories","بنود المصروفات"],
+  r_customer:["Customer statement","كشف حساب عميل"], r_supplier:["Supplier statement","كشف حساب مورد"],
+  r_project:["Project profitability","ربحية المشروع"], r_employee:["Employee report","تقرير الموظفين"],
+  r_bank:["Bank & cash ledger","حركة البنوك والنقد"], r_summary:["Financial summary","الملخص المالي"],
+  revenue:["Revenue","الإيرادات"], costs:["Costs","التكاليف"], profit:["Net profit","صافي الربح"],
+  cash:["Cash on hand","النقد المتوفر"], ar:["Receivable","ذمم مدينة"], ap:["Payable","ذمم دائنة"],
+  save:["Save","حفظ"], cancel:["Cancel","إلغاء"], add:["Add","إضافة"], edit:["Edit","تعديل"],
+  del:["Delete","حذف"], print:["Print / PDF","طباعة"], search:["Search","بحث"],
+  from:["From","من"], to:["To","إلى"], total:["Total","الإجمالي"], balance:["Balance","الرصيد"],
+  debit:["Debit","مدين"], credit:["Credit","دائن"], opening:["Opening","رصيد افتتاحي"],
+  closing:["Closing","الرصيد الختامي"], date:["Date","التاريخ"], type:["Type","النوع"],
+  phase:["Phase","المرحلة"], status:["Status","الحالة"], amount:["Amount","المبلغ"],
+  ref:["Reference No","رقم المرجع"], notes:["Notes","ملاحظات"], none:["No records yet","لا توجد بيانات"]
+};
+let LANG = localStorage.getItem("environmsafe.lang") || "en";
+const t = k => (T[k] ? T[k][LANG === "ar" ? 1 : 0] : k);
+
+/* ---------- storage ---------- */
+
+const blankDb = () => ({
+  meta:{ seq:{}, created:new Date().toISOString(), device:"device-" + Math.random().toString(36).slice(2,8) },
+  customers:[], suppliers:[], employees:[], projects:[], accounts:[], categories:[], transactions:[]
+});
+
+let DB = load();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(DB_KEY);
+    if (raw) { const d = JSON.parse(raw); return Object.assign(blankDb(), d); }
+  } catch (e) { console.warn("Could not read saved data:", e); }
+  const d = blankDb();
+  seed(d);
+  return d;
+}
+function save() {
+  try { localStorage.setItem(DB_KEY, JSON.stringify(DB)); }
+  catch (e) { toast("Storage is full — export a backup and remove old attachments."); }
+}
+function seed(d) {
+  const now = new Date().toISOString();
+  const mk = (tbl, prefix, rows) => rows.forEach((r,i) => {
+    d[tbl].push(Object.assign({ id:`${prefix}-${String(i+1).padStart(4,"0")}`, createdAt:now, updatedAt:now }, r));
+    d.meta.seq[prefix] = i+1;
+  });
+  mk("accounts","ACC",[
+    { nameEn:"Tadhamon Bank — main", nameAr:"بنك التضامن", kind:"Bank", bank:"Tadhamon", currency:"YER", opening:0 },
+    { nameEn:"Al Quataibi Bank", nameAr:"بنك القطيبي", kind:"Bank", bank:"Al Quataibi", currency:"YER", opening:0 },
+    { nameEn:"Al Kuraimi Bank", nameAr:"بنك الكريمي", kind:"Bank", bank:"Al Kuraimi", currency:"YER", opening:0 },
+    { nameEn:"Office cash", nameAr:"الصندوق", kind:"Cash", bank:"—", currency:"YER", opening:0 },
+    { nameEn:"Visa card", nameAr:"بطاقة فيزا", kind:"Visa card", bank:"Other", currency:"USD", opening:0 }
+  ]);
+  mk("categories","CAT",[
+    { nameEn:"Marketing", nameAr:"تسويق", kind:"Marketing" },
+    { nameEn:"Operating expenses", nameAr:"مصاريف تشغيلية", kind:"Operations" },
+    { nameEn:"Salaries", nameAr:"رواتب", kind:"Salaries" },
+    { nameEn:"Staff motivation", nameAr:"حوافز", kind:"Salaries" },
+    { nameEn:"Shipping & clearance", nameAr:"شحن وتخليص", kind:"Logistics" },
+    { nameEn:"Government fees", nameAr:"رسوم حكومية", kind:"Government" },
+    { nameEn:"Bank charges", nameAr:"عمولات بنكية", kind:"Finance" }
+  ]);
+}
+function nextId(prefix) {
+  DB.meta.seq[prefix] = (DB.meta.seq[prefix] || 0) + 1;
+  return `${prefix}-${String(DB.meta.seq[prefix]).padStart(4,"0")}`;
+}
+
+/* ---------- helpers ---------- */
+
+const $ = s => document.querySelector(s);
+const el = (tag, attrs = {}, html = "") => { const n = document.createElement(tag); Object.entries(attrs).forEach(([k,v]) => n.setAttribute(k,v)); if (html) n.innerHTML = html; return n; };
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const num = v => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
+const fmt = v => num(v).toLocaleString("en-US", { minimumFractionDigits:2, maximumFractionDigits:2 });
+const fmt0 = v => Math.round(num(v)).toLocaleString("en-US");
+const today = () => new Date().toISOString().slice(0,10);
+const monthOf = d => (d || "").slice(0,7);
+const rowsOf = tbl => DB[tbl] || [];
+const byId = (tbl, id) => rowsOf(tbl).find(r => r.id === id);
+const nameOf = (tbl, id) => { const r = byId(tbl, id); return r ? (LANG === "ar" && r.nameAr ? r.nameAr : r.nameEn) : ""; };
+
+let ROLE = localStorage.getItem("environmsafe.role") || "Data Entry";
+const canEdit = () => ROLE === "Data Entry" || ROLE === "Reviewer";
+const canApprove = () => ROLE === "Reviewer";
+
+function toast(msg) {
+  const n = el("div", { class:"toast" }, esc(msg));
+  document.body.appendChild(n);
+  setTimeout(() => n.remove(), 3200);
+}
+
+/* Android bridge (present inside the APK), else browser download */
+function saveFile(filename, content, mime = "application/json") {
+  if (window.AndroidBridge && window.AndroidBridge.saveFile) {
+    try { AndroidBridge.saveFile(filename, content); toast("Saved to Downloads: " + filename); return; }
+    catch (e) { /* fall through */ }
+  }
+  const blob = new Blob([content], { type:mime });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href:url, download:filename });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/* ---------- transaction maths ---------- */
+
+const flowOf = tx => typeOf(tx.type).flow || "";
+const isRevenue = tx => flowOf(tx) === "revenue";
+const isCost    = tx => flowOf(tx) === "cost" || flowOf(tx) === "cost_cash_out";
+const isCashIn  = tx => flowOf(tx) === "cash_in";
+const isCashOut = tx => flowOf(tx) === "cash_out" || flowOf(tx) === "cost_cash_out";
+const amountOf  = tx => num(tx.debit) + num(tx.credit);
+const live      = tx => tx.status !== "Cancelled";
+
+function inRange(tx, from, to) {
+  if (from && tx.date < from) return false;
+  if (to && tx.date > to) return false;
+  return true;
+}
+function txs(filter = {}) {
+  return DB.transactions
+    .filter(live)
+    .filter(tx => inRange(tx, filter.from, filter.to))
+    .filter(tx => !filter.customerId || tx.customerId === filter.customerId)
+    .filter(tx => !filter.supplierId || tx.supplierId === filter.supplierId)
+    .filter(tx => !filter.employeeId || tx.employeeId === filter.employeeId)
+    .filter(tx => !filter.projectId  || tx.projectId  === filter.projectId)
+    .filter(tx => !filter.accountId  || tx.accountId  === filter.accountId)
+    .filter(tx => !filter.type       || tx.type       === filter.type)
+    .filter(tx => !filter.status     || tx.status     === filter.status)
+    .sort((a,b) => (a.date + a.id).localeCompare(b.date + b.id));
+}
+const sum = (list, fn) => list.reduce((s,x) => s + num(fn(x)), 0);
+
+function accountBalance(accId, upto) {
+  const acc = byId("accounts", accId); if (!acc) return 0;
+  const list = txs({ accountId:accId, to:upto });
+  return num(acc.opening) + sum(list.filter(isCashIn), amountOf) - sum(list.filter(isCashOut), amountOf);
+}
+function customerBalance(cusId, upto) {
+  const c = byId("customers", cusId); if (!c) return 0;
+  const list = txs({ customerId:cusId, to:upto });
+  return num(c.opening) + sum(list.filter(isRevenue), amountOf) - sum(list.filter(isCashIn), amountOf);
+}
+function supplierBalance(supId, upto) {
+  const s = byId("suppliers", supId); if (!s) return 0;
+  const list = txs({ supplierId:supId, to:upto });
+  return num(s.opening) + sum(list.filter(isCost), amountOf) - sum(list.filter(isCashOut), amountOf);
+}
+const totalCash = () => rowsOf("accounts").reduce((s,a) => s + accountBalance(a.id), 0);
+const totalAR = () => rowsOf("customers").reduce((s,c) => s + customerBalance(c.id), 0);
+const totalAP = () => rowsOf("suppliers").reduce((s,x) => s + supplierBalance(x.id), 0);
+
+/* =========================================================================
+   Navigation
+   ========================================================================= */
+
+const NAV = [
+  { group:"Operations", items:[
+    { id:"dashboard", label:"dashboard" }, { id:"daily", label:"daily" },
+    { id:"ledger", label:"ledger" }, { id:"cases", label:"cases" } ] },
+  { group:"Master data", items:[
+    { id:"m_customers", label:"customers" }, { id:"m_suppliers", label:"suppliers" },
+    { id:"m_employees", label:"employees" }, { id:"m_projects", label:"projects" },
+    { id:"m_accounts", label:"accounts" }, { id:"m_categories", label:"categories" } ] },
+  { group:"Reports", items:[
+    { id:"r_summary", label:"r_summary" }, { id:"r_customer", label:"r_customer" },
+    { id:"r_supplier", label:"r_supplier" }, { id:"r_project", label:"r_project" },
+    { id:"r_employee", label:"r_employee" }, { id:"r_bank", label:"r_bank" } ] },
+  { group:"System", items:[ { id:"data", label:"data" } ] }
+];
+
+let VIEW = "dashboard";
+
+function renderNav() {
+  const nav = $("#nav"); nav.innerHTML = "";
+  NAV.forEach(g => {
+    nav.appendChild(el("div", { class:"navlabel" }, esc(g.group)));
+    const box = el("div", { class:"navgroup" });
+    g.items.forEach(it => {
+      const b = el("button", { class:"navbtn", "data-view":it.id, "aria-current":String(VIEW === it.id) }, esc(t(it.label)));
+      b.onclick = () => go(it.id);
+      box.appendChild(b);
+    });
+    nav.appendChild(box);
+  });
+}
+function go(view) { VIEW = view; render(); window.scrollTo(0,0); }
+
+function render() {
+  renderNav();
+  const m = $("#main"); m.innerHTML = "";
+  if (VIEW === "dashboard") viewDashboard(m);
+  else if (VIEW === "daily") viewDaily(m);
+  else if (VIEW === "ledger") viewLedger(m);
+  else if (VIEW === "cases") viewCases(m);
+  else if (VIEW.startsWith("m_")) viewMaster(m, VIEW.slice(2));
+  else if (VIEW.startsWith("r_")) viewReport(m, VIEW.slice(2));
+  else if (VIEW === "data") viewData(m);
+}
+
+function pageHead(parent, title, sub, actions = []) {
+  const h = el("div", { class:"page-head" });
+  const box = el("div"); box.appendChild(el("h1", {}, esc(title)));
+  if (sub) box.appendChild(el("div", { class:"sub" }, esc(sub)));
+  h.appendChild(box); h.appendChild(el("div", { class:"grow" }));
+  actions.forEach(a => {
+    const b = el("button", { class:"btn " + (a.cls || "ghost") + " noprint" }, esc(a.label));
+    if (a.disabled) b.setAttribute("disabled","");
+    b.onclick = a.on; h.appendChild(b);
+  });
+  parent.appendChild(h);
+  return h;
+}
+function printHeader(parent, title, sub) {
+  const h = el("div", { class:"printhead" });
+  h.innerHTML = `<div class="logo" style="width:38px;height:38px;display:grid;place-items:center;font-weight:800">${
+    COMPANY.logo ? "" : "ES"}</div>
+    <div><b>${esc(COMPANY.name)}</b><br><small>${esc(COMPANY.address)} · ${esc(COMPANY.email)} · ${esc(COMPANY.phone)}</small>
+    <br><b>${esc(title)}</b> ${sub ? "· " + esc(sub) : ""}</div>`;
+  if (COMPANY.logo) h.querySelector(".logo").style.backgroundImage = `url(${COMPANY.logo})`;
+  parent.appendChild(h);
+}
+
+/* =========================================================================
+   Dashboard
+   ========================================================================= */
+
+function viewDashboard(m) {
+  const all = txs();
+  const revenue = sum(all.filter(isRevenue), amountOf);
+  const cost    = sum(all.filter(isCost), amountOf);
+  const profit  = revenue - cost;
+
+  pageHead(m, t("dashboard"), COMPANY.name);
+  printHeader(m, "Management dashboard");
+
+  const kpis = el("div", { class:"kpis" });
+  const kpi = (k, v, note, cls = "") => kpis.appendChild(el("div", { class:"kpi " + cls },
+    `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="n">${esc(note || "")}</div>`));
+  kpi(t("revenue"), fmt0(revenue), "Customer invoices issued");
+  kpi(t("costs"), fmt0(cost), "Supplier bills, expenses, salaries");
+  kpi(t("profit"), fmt0(profit), "Revenue − costs", profit >= 0 ? "good" : "crit");
+  kpi(t("cash"), fmt0(totalCash()), "All bank & cash accounts");
+  kpi(t("ar"), fmt0(totalAR()), "Owed to us by customers");
+  kpi(t("ap"), fmt0(totalAP()), "Owed by us to suppliers");
+  m.appendChild(kpis);
+
+  /* monthly trend */
+  const card = el("div", { class:"card" });
+  card.appendChild(el("h2", {}, "Revenue vs cost by month"));
+  const months = [...new Set(all.filter(x => isRevenue(x) || isCost(x)).map(x => monthOf(x.date)))].sort().slice(-6);
+  if (!months.length) card.appendChild(el("div", { class:"empty" }, esc(t("none"))));
+  else {
+    const data = months.map(mo => ({
+      mo,
+      rev: sum(all.filter(x => isRevenue(x) && monthOf(x.date) === mo), amountOf),
+      cst: sum(all.filter(x => isCost(x) && monthOf(x.date) === mo), amountOf)
+    }));
+    card.appendChild(el("div", { class:"legend" },
+      `<span><i style="background:var(--c-1)"></i>Revenue</span><span><i style="background:var(--c-2)"></i>Cost</span>`));
+    card.appendChild(barChart(data));
+    card.appendChild(trendTable(data));
+  }
+  m.appendChild(card);
+
+  /* top lists */
+  const two = el("div", { class:"grid" });
+  two.appendChild(topList("Top customers by revenue",
+    rowsOf("customers").map(c => ({ n:nameOf("customers", c.id),
+      v:sum(all.filter(x => isRevenue(x) && x.customerId === c.id), amountOf) }))));
+  two.appendChild(topList("Top expense categories",
+    rowsOf("categories").map(c => ({ n:nameOf("categories", c.id),
+      v:sum(all.filter(x => isCost(x) && x.categoryId === c.id), amountOf) }))));
+  m.appendChild(two);
+
+  /* open procurement by phase */
+  const ph = el("div", { class:"card" });
+  ph.appendChild(el("h2", {}, "Procurement pipeline"));
+  const wrap = el("div", { class:"tablewrap" });
+  const rows = PHASES.map(p => {
+    const list = all.filter(x => x.phase === p);
+    return `<tr><td>${esc(p)}</td><td class="num">${list.length}</td>
+      <td class="num">${fmt0(sum(list, amountOf))}</td></tr>`;
+  }).join("");
+  wrap.innerHTML = `<table><thead><tr><th>Phase</th><th class="num">Records</th>
+    <th class="num">Value</th></tr></thead><tbody>${rows}</tbody></table>`;
+  ph.appendChild(wrap);
+  m.appendChild(ph);
+}
+
+function barChart(data) {
+  const W = Math.max(520, data.length * 96), H = 220, pad = { t:14, r:12, b:34, l:64 };
+  const max = Math.max(1, ...data.flatMap(d => [d.rev, d.cst]));
+  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  const bw = Math.min(26, (iw / data.length - 10) / 2);
+  const y = v => pad.t + ih - (v / max) * ih;
+  let g = "";
+  for (let i = 0; i <= 4; i++) {
+    const yy = pad.t + ih - (ih * i / 4);
+    g += `<line x1="${pad.l}" x2="${W-pad.r}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>
+          <text x="${pad.l-8}" y="${yy+4}" text-anchor="end" font-size="10" fill="var(--muted)"
+            font-family="var(--mono)">${fmt0(max*i/4)}</text>`;
+  }
+  data.forEach((d,i) => {
+    const cx = pad.l + (iw / data.length) * (i + .5);
+    [[d.rev,"var(--c-1)",-1],[d.cst,"var(--c-2)",1]].forEach(([v,col,dir]) => {
+      const h = Math.max(2, (v / max) * ih), x = cx + (dir < 0 ? -bw-1 : 1);
+      g += `<rect x="${x}" y="${y(v)}" width="${bw}" height="${h}" fill="${col}" rx="4" ry="4"><title>${
+        esc(d.mo)}: ${fmt0(v)}</title></rect>`;
+      if (v > 0) g += `<text x="${x+bw/2}" y="${y(v)-4}" text-anchor="middle" font-size="9.5"
+        fill="var(--ink-2)" font-family="var(--mono)">${fmt0(v)}</text>`;
+    });
+    g += `<text x="${cx}" y="${H-12}" text-anchor="middle" font-size="10.5" fill="var(--muted)">${esc(d.mo)}</text>`;
+  });
+  const box = el("div", { class:"chart" });
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img"
+    aria-label="Revenue versus cost by month">${g}</svg>`;
+  return box;
+}
+function trendTable(data) {
+  const wrap = el("div", { class:"tablewrap" }); wrap.style.marginTop = ".7rem";
+  wrap.innerHTML = `<table><thead><tr><th>Month</th><th class="num">Revenue</th>
+    <th class="num">Cost</th><th class="num">Margin</th></tr></thead><tbody>${
+    data.map(d => `<tr><td>${esc(d.mo)}</td><td class="num">${fmt0(d.rev)}</td>
+      <td class="num">${fmt0(d.cst)}</td><td class="num">${fmt0(d.rev - d.cst)}</td></tr>`).join("")
+    }</tbody></table>`;
+  return wrap;
+}
+function topList(title, items) {
+  const c = el("div", { class:"card" });
+  c.appendChild(el("h2", {}, esc(title)));
+  const rows = items.filter(x => x.v > 0).sort((a,b) => b.v - a.v).slice(0,5);
+  if (!rows.length) { c.appendChild(el("div", { class:"empty" }, esc(t("none")))); return c; }
+  const max = rows[0].v;
+  const wrap = el("div", { class:"tablewrap" });
+  wrap.innerHTML = `<table><tbody>${rows.map(r => `<tr><td>${esc(r.n)}</td>
+    <td style="width:45%"><div style="background:var(--c-1);height:8px;border-radius:4px;width:${
+      Math.max(4,(r.v/max)*100)}%"></div></td>
+    <td class="num">${fmt0(r.v)}</td></tr>`).join("")}</tbody></table>`;
+  c.appendChild(wrap);
+  return c;
+}
+
+/* =========================================================================
+   Daily entry — the single source of truth
+   ========================================================================= */
+
+let entryDraft = null;
+
+function viewDaily(m) {
+  pageHead(m, t("daily"), "Every business event is recorded here — one row per event.");
+  const card = el("div", { class:"card" });
+  card.appendChild(el("h2", {}, "New transaction"));
+  const form = el("form", { id:"entryForm" });
+  const g = el("div", { class:"grid" });
+
+  const d = entryDraft || { date:today(), type:"INVOICE OUT", status:"Draft" };
+
+  g.appendChild(fld("Date | التاريخ", `<input type="date" name="date" value="${esc(d.date)}" required>`));
+  g.appendChild(fld("Transaction type | نوع الحركة",
+    `<select name="type" id="typeSel" required>${TXTYPES.map(x =>
+      `<option value="${esc(x.v)}" ${x.v === d.type ? "selected" : ""}>${esc(x.v)} — ${esc(x.ar)}</option>`).join("")}</select>`));
+  g.appendChild(fld("Phase | المرحلة",
+    `<select name="phase">${PHASES.map(p => `<option ${p === typeOf(d.type).phase ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>`));
+  g.appendChild(fld("Case / file no | رقم الملف",
+    `<input name="caseNo" list="caseList" value="${esc(d.caseNo || "")}" placeholder="e.g. CASE-2026-014">
+     <datalist id="caseList">${caseNumbers().map(c => `<option value="${esc(c)}">`).join("")}</datalist>`));
+
+  g.appendChild(fld("Customer | العميل", refSelect("customerId","customers", d.customerId)));
+  g.appendChild(fld("Supplier | المورد", refSelect("supplierId","suppliers", d.supplierId)));
+  g.appendChild(fld("Employee | الموظف", refSelect("employeeId","employees", d.employeeId)));
+  g.appendChild(fld("Project | المشروع", refSelect("projectId","projects", d.projectId)));
+  g.appendChild(fld("Bank / cash account | الحساب", refSelect("accountId","accounts", d.accountId)));
+  g.appendChild(fld("Expense category | البند", refSelect("categoryId","categories", d.categoryId)));
+
+  g.appendChild(fld("Amount | المبلغ", `<input type="number" step="0.01" min="0" name="amount" value="${
+    d.amount || ""}" placeholder="0.00">`));
+  g.appendChild(fld("Status | الحالة",
+    `<select name="status">${STATUSES.map(s => `<option ${s === d.status ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`));
+  g.appendChild(fld("Reference no | رقم المرجع", `<input name="refNo" value="${esc(d.refNo || "")}" placeholder="INV-1024 / PO-88">`));
+  g.appendChild(fld("Document type | نوع المستند",
+    `<select name="docType"><option value=""></option>${DOCTYPES.map(x => `<option>${esc(x)}</option>`).join("")}</select>`));
+  g.appendChild(fld("Document file / link | المستند", `<input name="docRef" placeholder="quotation-1024.pdf or Drive link">`));
+  form.appendChild(g);
+  form.appendChild(fld("Notes | ملاحظات", `<textarea name="notes" rows="2"></textarea>`));
+
+  const bar = el("div", { class:"actions", style:"display:flex;gap:.5rem;margin-top:.9rem" });
+  const submit = el("button", { class:"btn gold", type:"submit" }, t("save"));
+  if (!canEdit()) submit.setAttribute("disabled","");
+  bar.appendChild(submit);
+  const hint = el("div", { class:"card-note", style:"align-self:center" });
+  bar.appendChild(hint);
+  form.appendChild(bar);
+  card.appendChild(form);
+  m.appendChild(card);
+
+  const syncHint = () => {
+    const ty = typeOf(form.type.value);
+    form.phase.value = ty.phase;
+    hint.textContent = ty.fin
+      ? `Amount will be posted to the ${ty.side.toUpperCase()} column` + (ty.cash ? " and will move the selected account." : ".")
+      : "No financial posting — this is a procurement document only.";
+  };
+  form.type.onchange = syncHint; syncHint();
+
+  form.onsubmit = e => {
+    e.preventDefault();
+    if (!canEdit()) return toast("Your role is read-only.");
+    const f = Object.fromEntries(new FormData(form).entries());
+    const ty = typeOf(f.type);
+    const amount = num(f.amount);
+    if (ty.fin && amount <= 0) return toast("Enter an amount greater than zero.");
+    if (ty.cash && !f.accountId) return toast("Select the bank or cash account used.");
+    const now = new Date().toISOString();
+    const tx = {
+      id: nextId("TRX"), date:f.date, type:f.type, phase:f.phase, caseNo:f.caseNo.trim(),
+      customerId:f.customerId, supplierId:f.supplierId, employeeId:f.employeeId,
+      projectId:f.projectId, accountId:f.accountId, categoryId:f.categoryId,
+      debit: ty.side === "debit" ? amount : 0,
+      credit: ty.side === "credit" ? amount : 0,
+      status:f.status, refNo:f.refNo, docType:f.docType, docRef:f.docRef, notes:f.notes,
+      createdBy:ROLE, createdAt:now, updatedAt:now
+    };
+    DB.transactions.push(tx); save();
+    entryDraft = { date:f.date, type:f.type, caseNo:f.caseNo, status:"Draft" };
+    toast(`Saved ${tx.id}`);
+    render();
+  };
+
+  /* recent rows */
+  const recent = DB.transactions.slice(-12).reverse();
+  const c2 = el("div", { class:"card" });
+  c2.appendChild(el("h2", {}, "Last 12 entries"));
+  c2.appendChild(txTable(recent));
+  m.appendChild(c2);
+}
+
+function fld(label, inner) {
+  const [en, ar] = label.split("|");
+  const f = el("div", { class:"field" });
+  f.innerHTML = `<label>${esc(en.trim())} ${ar ? `<span class="ar">${esc(ar.trim())}</span>` : ""}</label>${inner}`;
+  return f;
+}
+function refSelect(name, tbl, val) {
+  return `<select name="${name}"><option value=""></option>${rowsOf(tbl).map(r =>
+    `<option value="${esc(r.id)}" ${r.id === val ? "selected" : ""}>${esc(r.nameEn)}</option>`).join("")}</select>`;
+}
+const caseNumbers = () => [...new Set(DB.transactions.map(x => x.caseNo).filter(Boolean))].sort();
+
+function txTable(list, opts = {}) {
+  const wrap = el("div", { class:"tablewrap" });
+  if (!list.length) { wrap.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; return wrap; }
+  const body = list.map(tx => `<tr>
+    <td>${esc(tx.id)}</td><td>${esc(tx.date)}</td><td>${esc(tx.type)}</td>
+    <td>${esc(tx.caseNo || "")}</td>
+    <td>${esc(nameOf("customers",tx.customerId) || nameOf("suppliers",tx.supplierId) || nameOf("employees",tx.employeeId) || "")}</td>
+    <td>${esc(nameOf("projects",tx.projectId))}</td>
+    <td>${esc(nameOf("accounts",tx.accountId))}</td>
+    <td class="num">${num(tx.debit) ? fmt(tx.debit) : ""}</td>
+    <td class="num">${num(tx.credit) ? fmt(tx.credit) : ""}</td>
+    <td><span class="pill ${esc((tx.status||"draft").toLowerCase())}">${esc(tx.status)}</span></td>
+    <td>${esc(tx.refNo || "")}</td><td>${esc(tx.docRef || "")}</td>
+    <td class="noprint"><div class="rowactions">
+      <button class="linkbtn" data-act="edit" data-id="${esc(tx.id)}">${esc(t("edit"))}</button>
+      <button class="linkbtn" data-act="del" data-id="${esc(tx.id)}">${esc(t("del"))}</button>
+    </div></td></tr>`).join("");
+  wrap.innerHTML = `<table><thead><tr>
+    <th>ID</th><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th><th>Case</th><th>Party</th>
+    <th>Project</th><th>Account</th><th class="num">${esc(t("debit"))}</th><th class="num">${esc(t("credit"))}</th>
+    <th>${esc(t("status"))}</th><th>${esc(t("ref"))}</th><th>Document</th><th class="noprint"></th>
+    </tr></thead><tbody>${body}</tbody>
+    <tfoot><tr><td colspan="7">${esc(t("total"))}</td>
+      <td class="num">${fmt(sum(list, x => x.debit))}</td>
+      <td class="num">${fmt(sum(list, x => x.credit))}</td>
+      <td colspan="4"></td></tr></tfoot></table>`;
+  wrap.querySelectorAll("[data-act]").forEach(b => {
+    b.onclick = () => {
+      const tx = DB.transactions.find(x => x.id === b.dataset.id);
+      if (!tx) return;
+      if (b.dataset.act === "del") {
+        if (!canEdit()) return toast("Your role is read-only.");
+        if (confirm(`Delete ${tx.id}?`)) {
+          DB.transactions = DB.transactions.filter(x => x.id !== tx.id); save(); render();
+        }
+      } else editTx(tx);
+    };
+  });
+  return wrap;
+}
+
+function editTx(tx) {
+  const ty = typeOf(tx.type);
+  modal("Edit " + tx.id, [
+    { k:"date", l:"Date", t:"date", v:tx.date },
+    { k:"amount", l:"Amount", t:"number", v:amountOf(tx) },
+    { k:"status", l:"Status", t:"select", opts:STATUSES, v:tx.status },
+    { k:"caseNo", l:"Case / file no", v:tx.caseNo },
+    { k:"refNo", l:"Reference no", v:tx.refNo },
+    { k:"docRef", l:"Document file / link", v:tx.docRef },
+    { k:"notes", l:"Notes", t:"textarea", v:tx.notes }
+  ], vals => {
+    if (!canEdit()) return toast("Your role is read-only.");
+    if (vals.status === "Approved" && tx.status === "Draft" && !canApprove())
+      return toast("Only a Reviewer can approve.");
+    Object.assign(tx, vals);
+    const amt = num(vals.amount);
+    tx.debit  = ty.side === "debit"  ? amt : 0;
+    tx.credit = ty.side === "credit" ? amt : 0;
+    tx.updatedAt = new Date().toISOString();
+    save(); render(); toast("Updated " + tx.id);
+  });
+}
+
+/* =========================================================================
+   Ledger (all transactions, filterable)
+   ========================================================================= */
+
+let ledgerFilter = { from:"", to:"", type:"", status:"", q:"" };
+
+function viewLedger(m) {
+  pageHead(m, t("ledger"), "Daily_Transactions — the single source of truth", [
+    { label:t("print"), on:() => window.print() },
+    { label:"Export CSV", on:() => exportTransactionsCsv() }
+  ]);
+  printHeader(m, "Transactions", `${ledgerFilter.from || "start"} → ${ledgerFilter.to || today()}`);
+
+  const bar = el("div", { class:"toolbar noprint" });
+  bar.appendChild(fld("From | من", `<input type="date" id="f_from" value="${esc(ledgerFilter.from)}">`));
+  bar.appendChild(fld("To | إلى", `<input type="date" id="f_to" value="${esc(ledgerFilter.to)}">`));
+  bar.appendChild(fld("Type | النوع", `<select id="f_type"><option value=""></option>${
+    TXTYPES.map(x => `<option ${x.v === ledgerFilter.type ? "selected" : ""}>${esc(x.v)}</option>`).join("")}</select>`));
+  bar.appendChild(fld("Status | الحالة", `<select id="f_status"><option value=""></option>${
+    STATUSES.map(s => `<option ${s === ledgerFilter.status ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`));
+  bar.appendChild(fld("Search | بحث", `<input id="f_q" value="${esc(ledgerFilter.q)}" placeholder="reference, case, note">`));
+  const apply = el("button", { class:"btn sm" }, "Apply");
+  apply.onclick = () => {
+    ledgerFilter = { from:$("#f_from").value, to:$("#f_to").value, type:$("#f_type").value,
+                     status:$("#f_status").value, q:$("#f_q").value.trim().toLowerCase() };
+    render();
+  };
+  bar.appendChild(apply);
+  m.appendChild(bar);
+
+  let list = txs({ from:ledgerFilter.from, to:ledgerFilter.to, type:ledgerFilter.type, status:ledgerFilter.status });
+  if (ledgerFilter.q) {
+    const q = ledgerFilter.q;
+    list = list.filter(x => [x.refNo, x.caseNo, x.notes, x.docRef, x.id]
+      .some(v => String(v || "").toLowerCase().includes(q)));
+  }
+  m.appendChild(txTable(list));
+}
+
+function exportTransactionsCsv() {
+  const cols = ["id","date","type","phase","caseNo","customerId","supplierId","employeeId","projectId",
+                "accountId","categoryId","debit","credit","status","refNo","docType","docRef","notes","createdBy"];
+  const refTbl = { customerId:"customers", supplierId:"suppliers", employeeId:"employees",
+                   projectId:"projects", accountId:"accounts", categoryId:"categories" };
+  const head = cols.join(",");
+  const body = DB.transactions.map(tx => cols.map(c => csvCell(
+    refTbl[c] ? (tx[c] ? `${tx[c]} ${nameOf(refTbl[c], tx[c]) || ""}`.trim() : "") : tx[c]
+  )).join(",")).join("\n");
+  saveFile(`environmsafe-transactions-${today()}.csv`, head + "\n" + body, "text/csv");
+}
+const csvCell = v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
+
+/* =========================================================================
+   Procurement files (cases) — links the phases of one deal
+   ========================================================================= */
+
+function viewCases(m) {
+  pageHead(m, t("cases"), "Every document of one deal, grouped by case number");
+  const cases = caseNumbers();
+  if (!cases.length) {
+    m.appendChild(el("div", { class:"card" },
+      `<div class="empty">No case numbers yet. Type a case number (e.g. CASE-2026-001) in the daily entry
+       screen and reuse it for every RFQ, quotation, PO, invoice and payment of that deal.</div>`));
+    return;
+  }
+  cases.forEach(cn => {
+    const list = DB.transactions.filter(x => x.caseNo === cn)
+      .sort((a,b) => (a.date + a.id).localeCompare(b.date + b.id));
+    const rev = sum(list.filter(isRevenue), amountOf), cst = sum(list.filter(isCost), amountOf);
+    const card = el("div", { class:"card" });
+    card.appendChild(el("h2", {}, esc(cn)));
+    card.appendChild(el("div", { class:"card-note" },
+      `Revenue ${fmt0(rev)} · Cost ${fmt0(cst)} · Margin ${fmt0(rev - cst)}`));
+    const done = new Set(list.map(x => x.phase));
+    card.appendChild(el("div", { style:"display:flex;flex-wrap:wrap;gap:.3rem;margin:.6rem 0" },
+      PHASES.map(p => `<span class="pill ${done.has(p) ? "approved" : "draft"}">${esc(p)}${
+        done.has(p) ? " ✓" : ""}</span>`).join("")));
+    card.appendChild(txTable(list));
+    m.appendChild(card);
+  });
+}
+
+/* =========================================================================
+   Master data (generic CRUD)
+   ========================================================================= */
+
+function viewMaster(m, tbl) {
+  const S = SCHEMAS[tbl]; if (!S) return;
+  pageHead(m, LANG === "ar" ? S.ar : S.en, `${rowsOf(tbl).length} records`, [
+    { label:t("add"), cls:"gold", on:() => editMaster(tbl, null), disabled:!canEdit() },
+    { label:"Export CSV", on:() => exportMasterCsv(tbl) },
+    { label:"Import CSV", on:() => importMasterCsv(tbl), disabled:!canEdit() }
+  ]);
+  const wrap = el("div", { class:"tablewrap" });
+  const rows = rowsOf(tbl);
+  if (!rows.length) wrap.innerHTML = `<div class="empty">${esc(t("none"))}</div>`;
+  else {
+    const cols = S.cols;
+    const balCol = tbl === "customers" || tbl === "suppliers" || tbl === "accounts";
+    wrap.innerHTML = `<table><thead><tr><th>ID</th>${
+      cols.map(c => `<th>${esc((S.fields.find(f => f.k === c) || {}).l || c)}</th>`).join("")
+      }${balCol ? `<th class="num">${esc(t("balance"))}</th>` : ""}<th></th></tr></thead><tbody>${
+      rows.map(r => `<tr><td>${esc(r.id)}</td>${cols.map(c => {
+        const f = S.fields.find(x => x.k === c) || {};
+        const v = f.t === "ref" ? nameOf(f.ref, r[c]) : (f.t === "number" ? fmt(r[c]) : r[c]);
+        return `<td class="${f.t === "number" ? "num" : ""}">${esc(v || "")}</td>`;
+      }).join("")}${balCol ? `<td class="num">${fmt(
+        tbl === "customers" ? customerBalance(r.id) :
+        tbl === "suppliers" ? supplierBalance(r.id) : accountBalance(r.id))}</td>` : ""}
+      <td class="noprint"><div class="rowactions">
+        <button class="linkbtn" data-e="${esc(r.id)}">${esc(t("edit"))}</button>
+        <button class="linkbtn" data-d="${esc(r.id)}">${esc(t("del"))}</button></div></td></tr>`).join("")
+      }</tbody></table>`;
+  }
+  wrap.querySelectorAll("[data-e]").forEach(b => b.onclick = () => editMaster(tbl, b.dataset.e));
+  wrap.querySelectorAll("[data-d]").forEach(b => b.onclick = () => {
+    if (!canEdit()) return toast("Your role is read-only.");
+    const used = DB.transactions.some(x => Object.values(x).includes(b.dataset.d));
+    if (used) return toast("Cannot delete — this record is used in transactions.");
+    if (confirm("Delete this record?")) { DB[tbl] = rowsOf(tbl).filter(r => r.id !== b.dataset.d); save(); render(); }
+  });
+  m.appendChild(wrap);
+}
+
+function editMaster(tbl, id) {
+  if (!canEdit()) return toast("Your role is read-only.");
+  const S = SCHEMAS[tbl];
+  const rec = id ? byId(tbl, id) : null;
+  const fields = S.fields.map(f => Object.assign({}, f, { v: rec ? rec[f.k] : "" }));
+  modal((rec ? t("edit") : t("add")) + " — " + S.en, fields, vals => {
+    if (!vals.nameEn) return toast("Name is required.");
+    const now = new Date().toISOString();
+    if (rec) { Object.assign(rec, vals, { updatedAt:now }); }
+    else { DB[tbl].push(Object.assign({ id:nextId(S.prefix), createdAt:now, updatedAt:now }, vals)); }
+    save(); render(); toast("Saved");
+  });
+}
+
+function exportMasterCsv(tbl) {
+  const S = SCHEMAS[tbl];
+  const cols = ["id", ...S.fields.map(f => f.k)];
+  const csv = [cols.join(","), ...rowsOf(tbl).map(r => cols.map(c => csvCell(r[c])).join(","))].join("\n");
+  saveFile(`environmsafe-${tbl}-${today()}.csv`, csv, "text/csv");
+}
+
+function importMasterCsv(tbl) {
+  const S = SCHEMAS[tbl];
+  const inp = el("input", { type:"file", accept:".csv,text/csv" });
+  inp.onchange = () => {
+    const file = inp.files[0]; if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const rows = parseCsv(String(rd.result));
+        if (rows.length < 2) return toast("The file has no data rows.");
+        const head = rows[0].map(h => h.trim());
+        const keys = S.fields.map(f => f.k);
+        const map = head.map(h => {
+          const hit = keys.find(k => k.toLowerCase() === h.toLowerCase()) ||
+                      (/name/i.test(h) && !/arab/i.test(h) ? "nameEn" : "") ||
+                      (/arab/i.test(h) ? "nameAr" : "") ||
+                      (/phone|mobile|tel/i.test(h) ? "phone" : "") ||
+                      (/mail/i.test(h) ? "email" : "") ||
+                      (/address|location/i.test(h) ? "address" : "") ||
+                      (/contact|person/i.test(h) ? "contact" : "");
+          return hit || null;
+        });
+        let n = 0; const now = new Date().toISOString();
+        rows.slice(1).forEach(r => {
+          const rec = {}; map.forEach((k,i) => { if (k) rec[k] = (r[i] || "").trim(); });
+          if (!rec.nameEn) return;
+          DB[tbl].push(Object.assign({ id:nextId(S.prefix), createdAt:now, updatedAt:now }, rec)); n++;
+        });
+        save(); render(); toast(`Imported ${n} records`);
+      } catch (e) { toast("Could not read that CSV file."); }
+    };
+    rd.readAsText(file);
+  };
+  inp.click();
+}
+function parseCsv(text) {
+  const rows = []; let row = [], cur = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i+1] === '"') { cur += '"'; i++; }
+      else if (c === '"') q = false;
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+    else if (c !== "\r") cur += c;
+  }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter(r => r.some(c => c !== ""));
+}
+
+/* =========================================================================
+   Reports
+   ========================================================================= */
+
+let rep = { from:"", to:"", entity:"" };
+
+function viewReport(m, kind) {
+  const titles = { summary:t("r_summary"), customer:t("r_customer"), supplier:t("r_supplier"),
+                   project:t("r_project"), employee:t("r_employee"), bank:t("r_bank") };
+  pageHead(m, titles[kind], COMPANY.name, [{ label:t("print"), cls:"gold", on:() => window.print() }]);
+  printHeader(m, titles[kind], `${rep.from || "start"} → ${rep.to || today()}`);
+
+  const bar = el("div", { class:"toolbar noprint" });
+  bar.appendChild(fld("From | من", `<input type="date" id="r_from" value="${esc(rep.from)}">`));
+  bar.appendChild(fld("To | إلى", `<input type="date" id="r_to" value="${esc(rep.to)}">`));
+  const entTbl = { customer:"customers", supplier:"suppliers", project:"projects",
+                   employee:"employees", bank:"accounts" }[kind];
+  if (entTbl) bar.appendChild(fld("Select | اختر",
+    `<select id="r_ent"><option value="">— all —</option>${rowsOf(entTbl).map(r =>
+      `<option value="${esc(r.id)}" ${r.id === rep.entity ? "selected" : ""}>${esc(r.nameEn)}</option>`).join("")}</select>`));
+  const go2 = el("button", { class:"btn sm" }, "Run");
+  go2.onclick = () => {
+    rep = { from:$("#r_from").value, to:$("#r_to").value, entity: entTbl ? $("#r_ent").value : "" };
+    render();
+  };
+  bar.appendChild(go2);
+  m.appendChild(bar);
+
+  if (kind === "summary")  return repSummary(m);
+  if (kind === "customer") return repParty(m, "customers");
+  if (kind === "supplier") return repParty(m, "suppliers");
+  if (kind === "project")  return repProject(m);
+  if (kind === "employee") return repEmployee(m);
+  if (kind === "bank")     return repBank(m);
+}
+
+function repSummary(m) {
+  const list = txs({ from:rep.from, to:rep.to });
+  const revenue = sum(list.filter(isRevenue), amountOf);
+  const cost = sum(list.filter(isCost), amountOf);
+  const cin = sum(list.filter(isCashIn), amountOf), cout = sum(list.filter(isCashOut), amountOf);
+  const card = el("div", { class:"card" });
+  card.innerHTML = `<h2>Period result</h2>
+    <div class="tablewrap"><table><tbody>
+      <tr><td>Revenue — customer invoices</td><td class="num">${fmt(revenue)}</td></tr>
+      <tr><td>Cost — supplier bills, expenses, salaries</td><td class="num">${fmt(cost)}</td></tr>
+      <tr><td><b>Net profit</b></td><td class="num"><b>${fmt(revenue - cost)}</b></td></tr>
+      <tr><td>Cash received</td><td class="num">${fmt(cin)}</td></tr>
+      <tr><td>Cash paid</td><td class="num">${fmt(cout)}</td></tr>
+      <tr><td><b>Net cash movement</b></td><td class="num"><b>${fmt(cin - cout)}</b></td></tr>
+      <tr><td>Total ${esc(t("debit"))}</td><td class="num">${fmt(sum(list, x => x.debit))}</td></tr>
+      <tr><td>Total ${esc(t("credit"))}</td><td class="num">${fmt(sum(list, x => x.credit))}</td></tr>
+      <tr><td><b>Balance (Debit − Credit)</b></td><td class="num"><b>${fmt(
+        sum(list, x => x.debit) - sum(list, x => x.credit))}</b></td></tr>
+    </tbody></table></div>`;
+  m.appendChild(card);
+
+  const acc = el("div", { class:"card" });
+  acc.appendChild(el("h2", {}, "Balances by account"));
+  const w = el("div", { class:"tablewrap" });
+  w.innerHTML = `<table><thead><tr><th>Account</th><th>Type</th><th class="num">${
+    esc(t("balance"))}</th></tr></thead><tbody>${rowsOf("accounts").map(a =>
+    `<tr><td>${esc(a.nameEn)}</td><td>${esc(a.kind || "")}</td>
+      <td class="num">${fmt(accountBalance(a.id, rep.to))}</td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="2">${esc(t("total"))}</td>
+      <td class="num">${fmt(rowsOf("accounts").reduce((s,a) => s + accountBalance(a.id, rep.to), 0))}</td>
+    </tr></tfoot></table>`;
+  acc.appendChild(w);
+  m.appendChild(acc);
+}
+
+function repParty(m, tbl) {
+  const isCus = tbl === "customers";
+  const list = rep.entity ? [byId(tbl, rep.entity)].filter(Boolean) : rowsOf(tbl);
+  if (!list.length) { m.appendChild(el("div", { class:"card" }, `<div class="empty">${esc(t("none"))}</div>`)); return; }
+  list.forEach(p => {
+    const key = isCus ? "customerId" : "supplierId";
+    const all = txs({ [key]:p.id });
+    const before = all.filter(x => rep.from && x.date < rep.from);
+    const opening = num(p.opening) +
+      (isCus ? sum(before.filter(isRevenue), amountOf) - sum(before.filter(isCashIn), amountOf)
+             : sum(before.filter(isCost), amountOf) - sum(before.filter(isCashOut), amountOf));
+    const period = all.filter(x => inRange(x, rep.from, rep.to))
+      .filter(x => isCus ? (isRevenue(x) || isCashIn(x)) : (isCost(x) || isCashOut(x)));
+    let run = opening;
+    const body = period.map(x => {
+      const up = isCus ? isRevenue(x) : isCost(x);
+      const amt = amountOf(x);
+      run += up ? amt : -amt;
+      return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}</td><td>${esc(x.refNo || "")}</td>
+        <td>${esc(x.caseNo || "")}</td>
+        <td class="num">${up ? fmt(amt) : ""}</td><td class="num">${up ? "" : fmt(amt)}</td>
+        <td class="num">${fmt(run)}</td></tr>`;
+    }).join("");
+    const card = el("div", { class:"card" });
+    card.appendChild(el("h2", {}, esc(p.nameEn) + (p.nameAr ? " — " + p.nameAr : "")));
+    card.appendChild(el("div", { class:"card-note" },
+      `${esc(p.phone || "")} ${esc(p.email || "")} · ${esc(t("opening"))}: ${fmt(opening)}`));
+    const w = el("div", { class:"tablewrap" }); w.style.marginTop = ".6rem";
+    w.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
+      <th>${esc(t("ref"))}</th><th>Case</th>
+      <th class="num">${isCus ? "Invoiced" : "Billed"}</th>
+      <th class="num">${isCus ? "Received" : "Paid"}</th>
+      <th class="num">${esc(t("balance"))}</th></tr></thead>
+      <tbody><tr><td colspan="6">${esc(t("opening"))}</td><td class="num">${fmt(opening)}</td></tr>
+      ${body || ""}</tbody>
+      <tfoot><tr><td colspan="4">${esc(t("closing"))}</td>
+        <td class="num">${fmt(sum(period.filter(x => isCus ? isRevenue(x) : isCost(x)), amountOf))}</td>
+        <td class="num">${fmt(sum(period.filter(x => isCus ? isCashIn(x) : isCashOut(x)), amountOf))}</td>
+        <td class="num">${fmt(run)}</td></tr></tfoot></table>`;
+    card.appendChild(w);
+    m.appendChild(card);
+  });
+}
+
+function repProject(m) {
+  const list = rep.entity ? [byId("projects", rep.entity)].filter(Boolean) : rowsOf("projects");
+  const w = el("div", { class:"tablewrap" });
+  if (!list.length) { w.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; m.appendChild(w); return; }
+  const rows = list.map(p => {
+    const l = txs({ projectId:p.id, from:rep.from, to:rep.to });
+    const rev = sum(l.filter(isRevenue), amountOf), cst = sum(l.filter(isCost), amountOf);
+    const margin = rev ? ((rev - cst) / rev * 100) : 0;
+    return `<tr><td>${esc(p.nameEn)}</td><td>${esc(nameOf("customers", p.customerId))}</td>
+      <td>${esc(p.status || "")}</td><td class="num">${fmt(p.budget)}</td>
+      <td class="num">${fmt(rev)}</td><td class="num">${fmt(cst)}</td>
+      <td class="num">${fmt(rev - cst)}</td><td class="num">${margin.toFixed(1)}%</td></tr>`;
+  }).join("");
+  w.innerHTML = `<table><thead><tr><th>Project</th><th>Customer</th><th>Status</th>
+    <th class="num">Contract</th><th class="num">Revenue</th><th class="num">Cost</th>
+    <th class="num">Profit</th><th class="num">Margin</th></tr></thead><tbody>${rows}</tbody></table>`;
+  m.appendChild(w);
+}
+
+function repEmployee(m) {
+  const list = rep.entity ? [byId("employees", rep.entity)].filter(Boolean) : rowsOf("employees");
+  const w = el("div", { class:"tablewrap" });
+  if (!list.length) { w.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; m.appendChild(w); return; }
+  const rows = list.map(e => {
+    const l = txs({ employeeId:e.id, from:rep.from, to:rep.to });
+    const sal = sum(l.filter(x => x.type === "SALARY"), amountOf);
+    const adv = sum(l.filter(x => x.type === "ADVANCE TO EMPLOYEE"), amountOf);
+    return `<tr><td>${esc(e.nameEn)}</td><td>${esc(e.position || "")}</td>
+      <td class="num">${fmt(e.salary)}</td><td class="num">${fmt(sal)}</td>
+      <td class="num">${fmt(adv)}</td><td class="num">${fmt(sal - adv)}</td></tr>`;
+  }).join("");
+  w.innerHTML = `<table><thead><tr><th>Employee</th><th>Position</th><th class="num">Monthly salary</th>
+    <th class="num">Salaries paid</th><th class="num">Advances</th><th class="num">Net</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+  m.appendChild(w);
+}
+
+function repBank(m) {
+  const list = rep.entity ? [byId("accounts", rep.entity)].filter(Boolean) : rowsOf("accounts");
+  list.forEach(a => {
+    const all = txs({ accountId:a.id });
+    const before = all.filter(x => rep.from && x.date < rep.from);
+    const opening = num(a.opening) + sum(before.filter(isCashIn), amountOf) - sum(before.filter(isCashOut), amountOf);
+    const period = all.filter(x => inRange(x, rep.from, rep.to)).filter(x => isCashIn(x) || isCashOut(x));
+    let run = opening;
+    const body = period.map(x => {
+      const inn = isCashIn(x), amt = amountOf(x);
+      run += inn ? amt : -amt;
+      return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}</td><td>${esc(x.refNo || "")}</td>
+        <td>${esc(nameOf("customers",x.customerId) || nameOf("suppliers",x.supplierId) || nameOf("employees",x.employeeId) || "")}</td>
+        <td class="num">${inn ? fmt(amt) : ""}</td><td class="num">${inn ? "" : fmt(amt)}</td>
+        <td class="num">${fmt(run)}</td></tr>`;
+    }).join("");
+    const card = el("div", { class:"card" });
+    card.appendChild(el("h2", {}, esc(a.nameEn) + " — " + esc(a.kind || "") + (a.bank && a.bank !== "—" ? " · " + esc(a.bank) : "")));
+    const w = el("div", { class:"tablewrap" });
+    w.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
+      <th>${esc(t("ref"))}</th><th>Party</th><th class="num">In</th><th class="num">Out</th>
+      <th class="num">${esc(t("balance"))}</th></tr></thead>
+      <tbody><tr><td colspan="6">${esc(t("opening"))}</td><td class="num">${fmt(opening)}</td></tr>${body}</tbody>
+      <tfoot><tr><td colspan="4">${esc(t("closing"))}</td>
+        <td class="num">${fmt(sum(period.filter(isCashIn), amountOf))}</td>
+        <td class="num">${fmt(sum(period.filter(isCashOut), amountOf))}</td>
+        <td class="num">${fmt(run)}</td></tr></tfoot></table>`;
+    card.appendChild(w);
+    m.appendChild(card);
+  });
+}
+
+/* =========================================================================
+   Backup, restore, merge-sync
+   ========================================================================= */
+
+function viewData(m) {
+  pageHead(m, t("data"), "Move data between the phones and computers of your 5 users");
+
+  const c1 = el("div", { class:"card" });
+  c1.innerHTML = `<h2>Backup</h2><p class="card-note">Writes one file containing every record.
+    Keep it in Drive, OneDrive or WhatsApp so nothing is lost if a phone is replaced.</p>`;
+  const b1 = el("button", { class:"btn gold" }, "Download backup file");
+  b1.onclick = () => saveFile(`environmsafe-backup-${today()}.json`, JSON.stringify(DB, null, 1));
+  c1.appendChild(b1);
+  m.appendChild(c1);
+
+  const c2 = el("div", { class:"card" });
+  c2.innerHTML = `<h2>Restore / merge</h2><p class="card-note">
+    <b>Merge</b> adds records from another user's backup and keeps the newest version of anything edited
+    on both sides — this is how the 5 users stay in step today.
+    <b>Replace</b> throws away what is on this device first.</p>`;
+  const mkImport = (mode, label, cls) => {
+    const b = el("button", { class:"btn " + cls, style:"margin-inline-end:.5rem" }, label);
+    b.onclick = () => {
+      if (!canEdit()) return toast("Your role is read-only.");
+      const inp = el("input", { type:"file", accept:".json,application/json" });
+      inp.onchange = () => {
+        const f = inp.files[0]; if (!f) return;
+        const rd = new FileReader();
+        rd.onload = () => {
+          let incoming;
+          try { incoming = JSON.parse(String(rd.result)); }
+          catch (e) { return toast("That is not a valid backup file."); }
+          if (!incoming || !incoming.transactions) return toast("That file has no EnvironmSafe data.");
+          if (mode === "replace") {
+            if (!confirm("Replace ALL data on this device?")) return;
+            DB = Object.assign(blankDb(), incoming);
+          } else {
+            const added = mergeDb(incoming);
+            toast(`Merged — ${added} new or updated records`);
+          }
+          save(); render();
+        };
+        rd.readAsText(f);
+      };
+      inp.click();
+    };
+    return b;
+  };
+  c2.appendChild(mkImport("merge","Merge a backup","gold"));
+  c2.appendChild(mkImport("replace","Replace all data","ghost"));
+  m.appendChild(c2);
+
+  const c3 = el("div", { class:"card" });
+  c3.innerHTML = `<h2>Export for Excel</h2>
+    <p class="card-note">CSV files open directly in Excel.</p>`;
+  const box = el("div", { style:"display:flex;flex-wrap:wrap;gap:.4rem" });
+  const b3 = el("button", { class:"btn ghost sm" }, "Transactions");
+  b3.onclick = exportTransactionsCsv; box.appendChild(b3);
+  Object.keys(SCHEMAS).forEach(k => {
+    const b = el("button", { class:"btn ghost sm" }, SCHEMAS[k].en);
+    b.onclick = () => exportMasterCsv(k); box.appendChild(b);
+  });
+  c3.appendChild(box);
+  m.appendChild(c3);
+
+  const c4 = el("div", { class:"card" });
+  const counts = ["customers","suppliers","employees","projects","accounts","categories","transactions"]
+    .map(k => `<tr><td>${esc(k)}</td><td class="num">${rowsOf(k).length}</td></tr>`).join("");
+  c4.innerHTML = `<h2>This device</h2><div class="tablewrap"><table><tbody>${counts}
+    <tr><td>Device ID</td><td class="num">${esc(DB.meta.device || "")}</td></tr></tbody></table></div>`;
+  const b4 = el("button", { class:"btn ghost sm", style:"margin-top:.7rem" }, "Erase everything on this device");
+  b4.onclick = () => {
+    if (!canEdit()) return toast("Your role is read-only.");
+    if (confirm("Erase all data on this device? Export a backup first.")) {
+      DB = blankDb(); seed(DB); save(); render(); toast("Device cleared");
+    }
+  };
+  c4.appendChild(b4);
+  m.appendChild(c4);
+}
+
+function mergeDb(incoming) {
+  let n = 0;
+  const tables = ["customers","suppliers","employees","projects","accounts","categories","transactions"];
+  tables.forEach(tbl => {
+    (incoming[tbl] || []).forEach(r => {
+      if (!r || !r.id) return;
+      const mine = (DB[tbl] || []).find(x => x.id === r.id);
+      if (!mine) { DB[tbl].push(r); n++; }
+      else if ((r.updatedAt || "") > (mine.updatedAt || "")) { Object.assign(mine, r); n++; }
+    });
+    // keep the ID counter ahead of anything that arrived
+    (DB[tbl] || []).forEach(r => {
+      const mm = /^([A-Z]+)-(\d+)$/.exec(r.id || "");
+      if (mm) DB.meta.seq[mm[1]] = Math.max(DB.meta.seq[mm[1]] || 0, parseInt(mm[2],10));
+    });
+  });
+  return n;
+}
+
+/* =========================================================================
+   Generic modal form
+   ========================================================================= */
+
+function modal(title, fields, onSave) {
+  const bg = el("div", { class:"modal-bg" });
+  const box = el("div", { class:"modal" });
+  box.appendChild(el("h2", {}, esc(title)));
+  const form = el("form");
+  const g = el("div", { class:"grid" });
+  fields.forEach(f => {
+    let inner;
+    const v = f.v ?? "";
+    if (f.t === "textarea") inner = `<textarea name="${f.k}" rows="2">${esc(v)}</textarea>`;
+    else if (f.t === "select") inner = `<select name="${f.k}">${["", ...(f.opts || [])].map(o =>
+      `<option ${String(o) === String(v) ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+    else if (f.t === "ref") inner = refSelect(f.k, f.ref, v);
+    else inner = `<input type="${f.t || "text"}" ${f.t === "number" ? 'step="0.01"' : ""}
+      name="${f.k}" value="${esc(v)}" ${f.req ? "required" : ""}>`;
+    g.appendChild(fld(f.l, inner));
+  });
+  form.appendChild(g);
+  const act = el("div", { class:"actions" });
+  const cancel = el("button", { class:"btn ghost", type:"button" }, t("cancel"));
+  cancel.onclick = () => bg.remove();
+  act.appendChild(cancel);
+  act.appendChild(el("button", { class:"btn gold", type:"submit" }, t("save")));
+  form.appendChild(act);
+  form.onsubmit = e => {
+    e.preventDefault();
+    const vals = Object.fromEntries(new FormData(form).entries());
+    bg.remove();
+    onSave(vals);
+  };
+  box.appendChild(form);
+  bg.appendChild(box);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  document.body.appendChild(bg);
+  const first = box.querySelector("input,select,textarea"); if (first) first.focus();
+}
+
+/* =========================================================================
+   Boot
+   ========================================================================= */
+
+function applyChrome() {
+  document.documentElement.lang = LANG;
+  document.documentElement.dir = LANG === "ar" ? "rtl" : "ltr";
+  $("#coName").textContent = LANG === "ar" ? "إنفايرومسيف" : "EnvironmSafe";
+  $("#coTag").textContent = LANG === "ar" ? "المشتريات والمالية" : "Procurement & Finance";
+  if (COMPANY.logo) { $("#logoBox").textContent = ""; $("#logoBox").style.backgroundImage = `url(${COMPANY.logo})`; }
+}
+
+$("#langSel").value = LANG;
+$("#langSel").onchange = e => {
+  LANG = e.target.value; localStorage.setItem("environmsafe.lang", LANG);
+  applyChrome(); render();
+};
+$("#roleSel").innerHTML = ROLES.map(r => `<option ${r === ROLE ? "selected" : ""}>${r}</option>`).join("");
+$("#roleSel").onchange = e => {
+  ROLE = e.target.value; localStorage.setItem("environmsafe.role", ROLE); render();
+};
+
+applyChrome();
+save();
+render();
+</script>
+</body>
+</html>
