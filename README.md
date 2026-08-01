@@ -125,11 +125,14 @@ encrypt the stored data, so a backup file is readable by anyone who has it —
 keep backups somewhere private. Passwords are stored as salted SHA-256 hashes,
 never in plain text.
 
-### 2. The logo
+### 2. The letterhead
 
-The company logo is already embedded in the app, the sign-in screen and every
-printed report. To replace it, set `COMPANY.logo` near the top of the script in
-`web/app/index.html` to a new data URI.
+The company logo ships inside the app and appears in the top bar, on the sign-in
+screen and at the head of every report and document. Under **System → Company
+profile** an Administrator fills in the legal name in both languages, activity
+line, address, phones, email, website, tax and commercial registration numbers,
+and the default currency — and can replace the logo with any image under 400 KB.
+The preview on that screen shows exactly what will print.
 
 ### 3. Load your customers and suppliers from Excel
 
