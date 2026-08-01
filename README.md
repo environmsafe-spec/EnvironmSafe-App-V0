@@ -59,10 +59,36 @@ and receipts both post to Credit under that rule, the reports read each row by i
 **type** as well — revenue counts invoices only, cash counts receipts only — so
 revenue is never inflated by collecting an invoice.
 
+### Products & services
+
+**Master data → Products & services** holds everything the company quotes, buys or
+sells: code, English and Arabic description, type (Goods / Service / Work), unit,
+selling price and purchase price. Choose an item on a daily entry line and the
+unit price fills itself — selling price on anything going out to a customer,
+purchase price on anything coming in from a supplier — then quantity × unit price
+fills the amount.
+
+A document with several items is several lines sharing one reference number. That
+keeps one row per event, and it is what lets the system report per product.
+
+### Official documents
+
+**Reports → Official documents** turns the lines sharing a reference number into a
+printable document on company letterhead: logo, legal name in English and Arabic,
+activity, address, contacts, tax and registration numbers, then the customer's
+details, the numbered item lines with units and prices, totals, the bank account
+for payment, and signature blocks for prepared / approved / received. Quotation,
+invoice, purchase order and voucher titles follow the transaction type.
+
+Edit the letterhead under **System → Company profile** — every report and document
+picks it up, and the logo can be replaced there too.
+
 ### Reports
 
 Financial summary · Customer statement · Supplier statement · Project
-profitability · Employee report · Bank & cash ledger. Each takes a date range,
+profitability · Employee report · Bank & cash ledger · Product & service report
+(quantity sold and bought, sales and purchase value, average price and margin per
+item, with the movement detail behind any one item). Each takes a date range,
 shows opening / period / closing balances with a running balance, and prints to
 PDF with the company header (browser → Print → Save as PDF).
 
@@ -157,9 +183,11 @@ employees   EMP-0000  nameEn nameAr position phone salary notes
 projects    PRJ-0000  nameEn nameAr customerId kind status budget notes
 accounts    ACC-0000  nameEn nameAr kind bank number currency opening notes
 categories  CAT-0000  nameEn nameAr kind notes
+items       ITM-0000  code nameEn nameAr kind unit category salePrice costPrice notes
 transactions TRX-000000
             date type phase caseNo customerId supplierId employeeId projectId
-            accountId categoryId debit credit status refNo docType docRef notes
+            accountId categoryId itemId qty unitPrice debit credit status refNo
+            docType docRef notes
             createdBy createdAt updatedAt
 ```
 
