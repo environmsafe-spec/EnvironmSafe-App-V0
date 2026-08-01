@@ -3,15 +3,6 @@ plugins {
     id "kotlin-android"
 }
 
-// The system's screens live in /web/app so the website and the APK ship the
-// exact same files. This copies them into the APK's assets at build time.
-def webAssets = layout.buildDirectory.dir("generated/webassets")
-
-tasks.register("copyWebApp", Copy) {
-    from "$rootDir/web/app"
-    into webAssets.get().asFile.toPath().resolve("app").toFile()
-}
-
 android {
     namespace "com.environmsafe.app"
     compileSdk 34
@@ -26,7 +17,9 @@ android {
 
     sourceSets {
         main {
-            assets.srcDirs += webAssets
+            // The system's screens live in /web so the website and the APK ship the
+            // exact same files: /web/app/index.html is packaged as assets/app/index.html.
+            assets.srcDirs += "$rootDir/web"
         }
     }
 
@@ -44,12 +37,6 @@ android {
 
     kotlinOptions {
         jvmTarget = "11"
-    }
-}
-
-tasks.configureEach { task ->
-    if (task.name.startsWith("merge") && task.name.endsWith("Assets")) {
-        task.dependsOn "copyWebApp"
     }
 }
 
