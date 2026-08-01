@@ -51,6 +51,11 @@ jobs:
           # No-install fallback: the whole system as one file that opens in any
           # browser, for connections that cannot finish a large download.
           cp web/app/index.html dist/EnvironmSafe-System.html
+          # Android's download manager runs a verification step on .apk files that
+          # can hang after the bytes have all arrived, leaving the download stuck
+          # at 100%. The same APK inside a .zip downloads as an ordinary file;
+          # unzip it on the phone and install from there.
+          (cd dist && zip -q EnvironmSafe-App.zip EnvironmSafe-v0-debug.apk)
           ls -lh dist
 
       - name: Upload APKs as build artifacts
