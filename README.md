@@ -66,36 +66,53 @@ profitability · Employee report · Bank & cash ledger. Each takes a date range,
 shows opening / period / closing balances with a running balance, and prints to
 PDF with the company header (browser → Print → Save as PDF).
 
-### Roles
+### Users and roles
 
-`Data Entry` (create and edit), `Reviewer` (also approves), `Manager`
-(read-only). Chosen in the top bar — this is a working convenience, not
-authenticated security.
+The system is locked behind a username and password, and each person gets their
+own account with a role. See *Sign in* below for the first-use credentials.
 
 ---
 
 ## Setting it up for daily use
 
-### 1. Add your logo
+### 1. Sign in
 
-Open `web/app/index.html`, find the `COMPANY` block near the top of the script and
-set `logo` to a data URI:
+The system opens on a sign-in screen. On a brand-new device one account exists:
 
-```js
-logo: "data:image/png;base64,iVBORw0KGgo…"
-```
+| Username | Password | Role |
+|---|---|---|
+| `admin` | `EnvironmSafe@2026` | Administrator |
 
-It then appears in the top bar and on every printed report. Everything else in
-that block (name, address, email, phone) is already filled in.
+**Change it on first sign-in** — the system forces this before letting you in.
+Then create an account per person under **Users**: give each a username, a role,
+and a starting password they will be asked to replace when they first sign in.
 
-### 2. Load your customers and suppliers from Excel
+| Role | Can do |
+|---|---|
+| Administrator | everything, including managing users |
+| Data Entry | create and edit transactions and master data |
+| Reviewer | the same, plus approving transactions |
+| Manager | read-only — dashboards and reports |
+
+Sign-in keeps other people out of the app on a shared phone. It does **not**
+encrypt the stored data, so a backup file is readable by anyone who has it —
+keep backups somewhere private. Passwords are stored as salted SHA-256 hashes,
+never in plain text.
+
+### 2. The logo
+
+The company logo is already embedded in the app, the sign-in screen and every
+printed report. To replace it, set `COMPANY.logo` near the top of the script in
+`web/app/index.html` to a new data URI.
+
+### 3. Load your customers and suppliers from Excel
 
 In Excel: **File → Save As → CSV**. Then in the app: **Customers → Import CSV**
 (same for Suppliers). Column headers are matched automatically for name, phone,
 email, address and contact person; anything unmatched is ignored. Import as many
 times as you like — nothing is overwritten.
 
-### 3. Check the master data
+### 4. Check the master data
 
 Bank and cash accounts are pre-loaded with Tadhamon, Al Quataibi, Al Kuraimi,
 office cash and a Visa card, and expense categories with marketing, operations,
@@ -133,6 +150,7 @@ deliberately not switched on. The current storage layer is deliberately narrow �
 ### Data model
 
 ```
+users       USR-0000  nameEn nameAr username role active phone notes (+ salted hash)
 customers   CUS-0000  nameEn nameAr contact phone email address opening notes
 suppliers   SUP-0000  nameEn nameAr contact phone email address opening notes
 employees   EMP-0000  nameEn nameAr position phone salary notes
