@@ -97,6 +97,33 @@ still leaves the bank and the supplier is still owed exactly as before — only 
 profit treatment differs. The financial summary shows capital spending and
 depreciation on separate lines so both are visible.
 
+### Currencies
+
+Accounts hold USD, SAR, YER or AED and **money is never added across
+currencies**. Every transaction records the currency of the account it moved
+through. The picker in the top bar chooses which currency you are looking at;
+"All currencies" shows one dashboard block per currency rather than one wrong
+total. Bank balances, customer and supplier balances, revenue, costs and profit
+are all reported inside a single currency.
+
+### Importing an existing workbook
+
+`tools/import_workbook.py` converts an Excel workbook into a backup file the app
+merges:
+
+```
+pip install openpyxl
+python3 tools/import_workbook.py <workbook.xlsx> -o environmsafe-import.json
+```
+
+Then in the app: **Backup & sync → Merge a backup**. It derives customers,
+suppliers, employees, projects and accounts from the text used in the
+transactions (merging names that differ only by case), reads the currency from
+the account name, maps the sheet's money-out/money-in direction onto transaction
+types, and skips empty template rows and spreadsheet total rows. Imported records
+are numbered from 1001 so they can never collide with records already on the
+device.
+
 ### Official documents
 
 **Reports → Official documents** turns the lines sharing a reference number into a

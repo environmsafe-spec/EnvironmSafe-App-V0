@@ -229,6 +229,7 @@
     </div>
   </div>
   <div class="spacer"></div>
+  <select id="curSel" title="Currency"></select>
   <span id="whoami" class="whoami"></span>
   <button id="acctBtn" title="Account">Account</button>
   <select id="langSel" title="Language">
@@ -297,6 +298,11 @@ const TXTYPES = [
   { v:"ADVANCE TO EMPLOYEE", ar:"سلفة موظف",    phase:"OTHER",          party:"employee", fin:true, side:"debit",  flow:"cash_out", cash:true },
   { v:"LOAN IN",        ar:"قرض/دين وارد",      phase:"OTHER",          party:"none",     fin:true, side:"credit", flow:"cash_in",  cash:true },
   { v:"LOAN OUT",       ar:"قرض/دين صادر",      phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cash_out", cash:true },
+  { v:"TRANSFER IN",    ar:"تحويل وارد",        phase:"OTHER",          party:"none",     fin:true, side:"credit", flow:"cash_in",  cash:true },
+  { v:"TRANSFER OUT",   ar:"تحويل صادر",        phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cash_out", cash:true },
+  { v:"OWNER DRAWINGS", ar:"مسحوبات الشركاء",   phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cash_out", cash:true },
+  { v:"DEPOSIT PAID",   ar:"ضمان/تأمين مدفوع",  phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cash_out", cash:true, deposit:1 },
+  { v:"DEPOSIT RETURNED", ar:"استرداد ضمان",    phase:"OTHER",          party:"none",     fin:true, side:"credit", flow:"cash_in",  cash:true, deposit:-1 },
   { v:"OTHER",          ar:"أخرى",              phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"other" }
 ];
 const typeOf = v => TXTYPES.find(t => t.v === v) || TXTYPES[TXTYPES.length-1];
@@ -403,7 +409,7 @@ const T = {
   ledger:["Transactions","الحركات"], cases:["Procurement files","ملفات المشتريات"],
   masters:["Master data","البيانات الأساسية"], reports:["Reports","التقارير"],
   data:["Backup & sync","النسخ والمزامنة"], users:["Users","المستخدمون"],
-  items:["Products & services","المنتجات والخدمات"], assets:["Fixed assets","الأصول الثابتة"],
+  items:["Products & services","المنتجات والخدمات"], assets:["Fixed assets","الأصول الثابتة"], deposits:["Deposits held","ضمانات لدى الغير"],
   r_asset:["Asset register & depreciation","سجل الأصول والإهلاك"], company:["Company profile","بيانات الشركة"],
   r_item:["Product & service report","تقرير المنتجات والخدمات"],
   r_document:["Official documents","المستندات الرسمية"],
@@ -580,14 +586,47 @@ const isCashOut = tx => flowOf(tx) === "cash_out" || flowOf(tx) === "cost_cash_o
 const amountOf  = tx => num(tx.debit) + num(tx.credit);
 const live      = tx => tx.status !== "Cancelled";
 
+/* ---------- currency ----------
+   Money is never added across currencies. Every row carries the currency of the
+   account it moved through; rows with no account fall back to the company's
+   default. A currency must be chosen to see a single set of figures, and
+   "All currencies" renders one block per currency instead of one wrong total. */
+
+const CURRENCIES = ["YER","USD","SAR","AED"];
+let CUR = localStorage.getItem("environmsafe.currency") || "";
+
+function txCurrency(tx) {
+  if (tx.currency) return tx.currency;
+  const a = byId("accounts", tx.accountId);
+  return (a && a.currency) || CO().currency || "YER";
+}
+/** Currencies money has actually moved in, most used first. An account that has
+    never been used does not count — otherwise the dashboard splits into blocks
+    for currencies with nothing in them. */
+function currenciesInUse() {
+  const c = {};
+  DB.transactions.filter(live).forEach(tx => { const k = txCurrency(tx); c[k] = (c[k] || 0) + 1; });
+  return Object.keys(c).sort((a,b) => c[b] - c[a]);
+}
+/** Everything worth offering in the picker, including unused accounts. */
+function currencyChoices() {
+  const seen = new Set(currenciesInUse());
+  rowsOf("accounts").forEach(a => { if (a.currency) seen.add(a.currency); });
+  CURRENCIES.forEach(c => seen.add(c));
+  return [...seen];
+}
+const curSuffix = () => (CUR ? " " + CUR : "");
+
 function inRange(tx, from, to) {
   if (from && tx.date < from) return false;
   if (to && tx.date > to) return false;
   return true;
 }
 function txs(filter = {}) {
+  const cur = filter.currency !== undefined ? filter.currency : CUR;
   return DB.transactions
     .filter(live)
+    .filter(tx => !cur || txCurrency(tx) === cur)
     .filter(tx => inRange(tx, filter.from, filter.to))
     .filter(tx => !filter.customerId || tx.customerId === filter.customerId)
     .filter(tx => !filter.supplierId || tx.supplierId === filter.supplierId)
@@ -602,19 +641,28 @@ const sum = (list, fn) => list.reduce((s,x) => s + num(fn(x)), 0);
 
 function accountBalance(accId, upto) {
   const acc = byId("accounts", accId); if (!acc) return 0;
-  const list = txs({ accountId:accId, to:upto });
+  // an account holds one currency, so its own rows are always comparable
+  const list = txs({ accountId:accId, to:upto, currency:"" });
   return num(acc.opening) + sum(list.filter(isCashIn), amountOf) - sum(list.filter(isCashOut), amountOf);
 }
-function customerBalance(cusId, upto) {
+function customerBalance(cusId, upto, cur) {
   const c = byId("customers", cusId); if (!c) return 0;
-  const list = txs({ customerId:cusId, to:upto });
-  return num(c.opening) + sum(list.filter(isRevenue), amountOf) - sum(list.filter(isCashIn), amountOf);
+  const list = txs({ customerId:cusId, to:upto, currency:cur === undefined ? CUR : cur });
+  const opening = (cur === undefined ? CUR : cur) && (cur || CUR) !== (CO().currency || "YER") ? 0 : num(c.opening);
+  return opening + sum(list.filter(isRevenue), amountOf) - sum(list.filter(isCashIn), amountOf);
 }
-function supplierBalance(supId, upto) {
+function supplierBalance(supId, upto, cur) {
   const s = byId("suppliers", supId); if (!s) return 0;
-  const list = txs({ supplierId:supId, to:upto });
-  return num(s.opening) + sum(list.filter(isBilled), amountOf) - sum(list.filter(isCashOut), amountOf);
+  const list = txs({ supplierId:supId, to:upto, currency:cur === undefined ? CUR : cur });
+  const opening = (cur === undefined ? CUR : cur) && (cur || CUR) !== (CO().currency || "YER") ? 0 : num(s.opening);
+  return opening + sum(list.filter(isBilled), amountOf) - sum(list.filter(isCashOut), amountOf);
 }
+/** Refundable guarantees and deposits we are holding out with someone else. */
+const depositsHeld = (upto, cur) => {
+  const list = txs({ to:upto, currency:cur === undefined ? CUR : cur });
+  return sum(list.filter(x => typeOf(x.type).deposit === 1), amountOf) -
+         sum(list.filter(x => typeOf(x.type).deposit === -1), amountOf);
+};
 /* ---------- fixed assets & depreciation (straight line) ---------- */
 
 const monthsBetween = (from, to) => {
@@ -657,7 +705,8 @@ const totalNBV = upto => rowsOf("assets")
   .filter(a => assetLive(a)).reduce((s,a) => s + netBookValue(a, upto), 0);
 const periodDepn = (from, to) => rowsOf("assets").reduce((s,a) => s + depnInPeriod(a, from, to), 0);
 
-const totalCash = () => rowsOf("accounts").reduce((s,a) => s + accountBalance(a.id), 0);
+const curAccounts = () => rowsOf("accounts").filter(a => !CUR || (a.currency || CO().currency) === CUR);
+const totalCash = () => curAccounts().reduce((s,a) => s + accountBalance(a.id), 0);
 const totalAR = () => rowsOf("customers").reduce((s,c) => s + customerBalance(c.id), 0);
 const totalAP = () => rowsOf("suppliers").reduce((s,x) => s + supplierBalance(x.id), 0);
 
@@ -703,6 +752,7 @@ function go(view) { VIEW = view; render(); window.scrollTo(0,0); }
 
 function render() {
   renderNav();
+  if (USER) fillCurrencySelect();
   const m = $("#main"); m.innerHTML = "";
   if (VIEW === "dashboard") viewDashboard(m);
   else if (VIEW === "daily") viewDaily(m);
@@ -758,14 +808,54 @@ function printHeader(parent, title, sub) {
    Dashboard
    ========================================================================= */
 
+/** The KPI row on its own, so the per-currency blocks can reuse it. */
+function dashboardKpis(parent) {
+  const all = txs();
+  const revenue = sum(all.filter(isRevenue), amountOf);
+  const cost    = sum(all.filter(isCost), amountOf);
+  const depn    = periodDepn("", today());
+  const profit  = revenue - cost - depn;
+  const kpis = el("div", { class:"kpis" });
+  const kpi = (k, v, note, cls = "") => kpis.appendChild(el("div", { class:"kpi " + cls },
+    `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="n">${esc(note || "")}</div>`));
+  kpi(t("revenue"), fmt0(revenue), "Customer invoices");
+  kpi(t("costs"), fmt0(cost), "Bills, expenses, salaries");
+  kpi(t("profit"), fmt0(profit), "Revenue − costs", profit >= 0 ? "good" : "crit");
+  kpi(t("cash"), fmt0(totalCash()), "Bank & cash");
+  kpi(t("ar"), fmt0(totalAR()), "Owed to us");
+  kpi(t("ap"), fmt0(totalAP()), "We owe");
+  const dep = depositsHeld();
+  if (dep) kpi(t("deposits"), fmt0(dep), "Guarantees held");
+  parent.appendChild(kpis);
+}
+
 function viewDashboard(m) {
+  if (!CUR) {
+    const list = currenciesInUse();
+    if (list.length > 1) {
+      pageHead(m, t("dashboard"), CO().name);
+      m.appendChild(el("p", { class:"card-note", style:"margin:-.5rem 0 1rem" },
+        "Figures are shown per currency — money in different currencies is never added together. " +
+        "Pick a currency in the top bar to see one set of numbers."));
+      list.forEach(c => {
+        const box = el("div", { class:"card" });
+        box.appendChild(el("h2", {}, c));
+        const prev = CUR; CUR = c;
+        dashboardKpis(box);
+        CUR = prev;
+        m.appendChild(box);
+      });
+      return;
+    }
+    CUR = list[0] || CO().currency || "YER";
+  }
   const all = txs();
   const revenue = sum(all.filter(isRevenue), amountOf);
   const cost    = sum(all.filter(isCost), amountOf);
   const depn    = periodDepn("", today());
   const profit  = revenue - cost - depn;
 
-  pageHead(m, t("dashboard"), COMPANY.name);
+  pageHead(m, t("dashboard"), CO().name + " · " + CUR);
   printHeader(m, "Management dashboard");
 
   const kpis = el("div", { class:"kpis" });
@@ -774,9 +864,11 @@ function viewDashboard(m) {
   kpi(t("revenue"), fmt0(revenue), "Customer invoices issued");
   kpi(t("costs"), fmt0(cost), "Supplier bills, expenses, salaries");
   kpi(t("profit"), fmt0(profit), "Revenue − costs − depreciation", profit >= 0 ? "good" : "crit");
-  kpi(t("cash"), fmt0(totalCash()), "All bank & cash accounts");
+  kpi(t("cash"), fmt0(totalCash()), `Bank & cash in ${CUR}`);
   kpi(t("ar"), fmt0(totalAR()), "Owed to us by customers");
   kpi(t("ap"), fmt0(totalAP()), "Owed by us to suppliers");
+  const dep = depositsHeld();
+  if (dep) kpi(t("deposits"), fmt0(dep), "Guarantees & deposits, refundable");
   if (rowsOf("assets").length)
     kpi(t("assets"), fmt0(totalNBV()), `Net book value · cost ${fmt0(totalAssetCost())}`);
   m.appendChild(kpis);
@@ -988,6 +1080,7 @@ function viewDaily(m) {
       customerId:f.customerId, supplierId:f.supplierId, employeeId:f.employeeId,
       projectId:f.projectId, accountId:f.accountId, categoryId:f.categoryId,
       itemId:f.itemId, qty:num(f.qty), unitPrice:num(f.unitPrice), isAsset:f.isAsset,
+      currency:(byId("accounts", f.accountId) || {}).currency || CO().currency || "YER",
       debit: ty.side === "debit" ? amount : 0,
       credit: ty.side === "credit" ? amount : 0,
       status:f.status, refNo:f.refNo, docType:f.docType, docRef:f.docRef, notes:f.notes,
@@ -1647,7 +1740,7 @@ function repSummary(m) {
   const depn = periodDepn(rep.from, rep.to || today());
   const cin = sum(list.filter(isCashIn), amountOf), cout = sum(list.filter(isCashOut), amountOf);
   const card = el("div", { class:"card" });
-  card.innerHTML = `<h2>Period result</h2>
+  card.innerHTML = `<h2>Period result${esc(curSuffix())}</h2>
     <div class="tablewrap"><table><tbody>
       <tr><td>Revenue — customer invoices</td><td class="num">${fmt(revenue)}</td></tr>
       <tr><td>Cost — supplier bills, expenses, salaries</td><td class="num">${fmt(cost)}</td></tr>
@@ -1655,6 +1748,8 @@ function repSummary(m) {
       <tr><td><b>Net profit</b></td><td class="num"><b>${fmt(revenue - cost - depn)}</b></td></tr>
       <tr><td>Capital spending on assets (not a cost)</td><td class="num">${fmt(capex)}</td></tr>
       <tr><td>Fixed assets at net book value</td><td class="num">${fmt(totalNBV(rep.to))}</td></tr>
+      <tr><td>Guarantees & deposits held with others</td><td class="num">${fmt(depositsHeld(rep.to))}</td></tr>
+      <tr><td>Owner drawings</td><td class="num">${fmt(sum(list.filter(x => x.type === "OWNER DRAWINGS"), amountOf))}</td></tr>
       <tr><td>Cash received</td><td class="num">${fmt(cin)}</td></tr>
       <tr><td>Cash paid</td><td class="num">${fmt(cout)}</td></tr>
       <tr><td><b>Net cash movement</b></td><td class="num"><b>${fmt(cin - cout)}</b></td></tr>
@@ -1668,12 +1763,12 @@ function repSummary(m) {
   const acc = el("div", { class:"card" });
   acc.appendChild(el("h2", {}, "Balances by account"));
   const w = el("div", { class:"tablewrap" });
-  w.innerHTML = `<table><thead><tr><th>Account</th><th>Type</th><th class="num">${
-    esc(t("balance"))}</th></tr></thead><tbody>${rowsOf("accounts").map(a =>
-    `<tr><td>${esc(a.nameEn)}</td><td>${esc(a.kind || "")}</td>
+  w.innerHTML = `<table><thead><tr><th>Account</th><th>Type</th><th>Currency</th><th class="num">${
+    esc(t("balance"))}</th></tr></thead><tbody>${curAccounts().map(a =>
+    `<tr><td>${esc(a.nameEn)}</td><td>${esc(a.kind || "")}</td><td>${esc(a.currency || "")}</td>
       <td class="num">${fmt(accountBalance(a.id, rep.to))}</td></tr>`).join("")}
-    </tbody><tfoot><tr><td colspan="2">${esc(t("total"))}</td>
-      <td class="num">${fmt(rowsOf("accounts").reduce((s,a) => s + accountBalance(a.id, rep.to), 0))}</td>
+    </tbody><tfoot><tr><td colspan="3">${esc(t("total"))}${esc(curSuffix())}</td>
+      <td class="num">${fmt(curAccounts().reduce((s,a) => s + accountBalance(a.id, rep.to), 0))}</td>
     </tr></tfoot></table>`;
   acc.appendChild(w);
   m.appendChild(acc);
@@ -1761,7 +1856,7 @@ function repEmployee(m) {
 }
 
 function repBank(m) {
-  const list = rep.entity ? [byId("accounts", rep.entity)].filter(Boolean) : rowsOf("accounts");
+  const list = rep.entity ? [byId("accounts", rep.entity)].filter(Boolean) : curAccounts();
   list.forEach(a => {
     const all = txs({ accountId:a.id });
     const before = all.filter(x => rep.from && x.date < rep.from);
@@ -2033,6 +2128,17 @@ $("#langSel").onchange = e => {
 };
 $("#acctBtn").onclick = accountMenu;
 
+function fillCurrencySelect() {
+  const list = currencyChoices();
+  $("#curSel").innerHTML = `<option value="">All currencies</option>` +
+    list.map(c => `<option value="${esc(c)}" ${c === CUR ? "selected" : ""}>${esc(c)}</option>`).join("");
+}
+$("#curSel").onchange = e => {
+  CUR = e.target.value;
+  localStorage.setItem("environmsafe.currency", CUR);
+  render();
+};
+
 /* ---------- login ---------- */
 
 const SESSION_KEY = "environmsafe.session";
@@ -2041,6 +2147,7 @@ function chromeForUser() {
   const on = !!USER;
   $("#whoami").textContent = on ? `${USER.nameEn} · ${USER.role}` : "";
   $("#acctBtn").style.display = on ? "" : "none";
+  $("#curSel").style.display = on ? "" : "none";
   $("#nav").style.display = on ? "" : "none";
   document.querySelector(".shell").classList.toggle("noauth", !on);
 }
