@@ -73,6 +73,8 @@ def currency_of(account):
     for c in ("USD", "SAR", "YER", "AED"):
         if c in a:
             return c
+    if "VISA" in a:
+        return "USD"          # the company's Visa cards are held in USD
     return ""
 
 
