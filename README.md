@@ -71,6 +71,32 @@ fills the amount.
 A document with several items is several lines sharing one reference number. That
 keeps one row per event, and it is what lets the system report per product.
 
+### Fixed assets
+
+**Master data → Fixed assets** is the register: tag, name in both languages,
+category, serial or plate number, location, custodian, supplier, acquisition date
+and cost, useful life, residual value, status and source. Assets the company
+already owns go in directly with source *Opening balance*.
+
+New assets arrive through the purchase itself. Tick **"Is this a fixed asset?"**
+on a supplier bill, expense or payment out — it ticks itself when the catalogue
+item is marked as an asset — give the tag and location, and saving the purchase
+writes the register entry, linked back to the transaction that bought it.
+
+**Reports → Asset register & depreciation** shows acquisition cost, depreciation
+for the period, accumulated depreciation and net book value, per asset and by
+category, over any date range.
+
+Depreciation is straight line: `(cost − residual) ÷ useful life`, charged monthly
+from the acquisition date and stopping at disposal. An asset with no useful life
+is held at cost.
+
+**Buying an asset is not a cost of the period.** It is capital spending: it does
+not reduce profit, depreciation does, spread across the asset's life. The money
+still leaves the bank and the supplier is still owed exactly as before — only the
+profit treatment differs. The financial summary shows capital spending and
+depreciation on separate lines so both are visible.
+
 ### Official documents
 
 **Reports → Official documents** turns the lines sharing a reference number into a
@@ -186,10 +212,14 @@ employees   EMP-0000  nameEn nameAr position phone salary notes
 projects    PRJ-0000  nameEn nameAr customerId kind status budget notes
 accounts    ACC-0000  nameEn nameAr kind bank number currency opening notes
 categories  CAT-0000  nameEn nameAr kind notes
-items       ITM-0000  code nameEn nameAr kind unit category salePrice costPrice notes
+items       ITM-0000  code nameEn nameAr kind unit category salePrice costPrice
+                      isAsset lifeYears notes
+assets      AST-0000  tag nameEn nameAr category itemId serial location custodianId
+                      supplierId acquiredOn qty cost lifeYears salvage method status
+                      source sourceTx disposedOn disposalValue notes
 transactions TRX-000000
             date type phase caseNo customerId supplierId employeeId projectId
-            accountId categoryId itemId qty unitPrice debit credit status refNo
+            accountId categoryId itemId qty unitPrice isAsset debit credit status refNo
             docType docRef notes
             createdBy createdAt updatedAt
 ```

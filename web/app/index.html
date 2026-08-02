@@ -302,6 +302,10 @@ const TXTYPES = [
 const typeOf = v => TXTYPES.find(t => t.v === v) || TXTYPES[TXTYPES.length-1];
 
 const STATUSES = ["Draft","Approved","Paid","Closed","Cancelled"];
+const ASSET_CATEGORIES = ["Vehicles","Machinery & equipment","Safety equipment","Office equipment",
+  "IT & computers","Furniture & fittings","Tools","Buildings & premises","Other"];
+const ASSET_STATUS = ["In use","In store","Under maintenance","Disposed","Sold"];
+const ASSET_LIVE = ["In use","In store","Under maintenance"];
 const ROLES = ["Administrator","Data Entry","Reviewer","Manager"];
 const DEFAULT_ADMIN = { username:"admin", password:"EnvironmSafe@2026" };
 const DOCTYPES = ["RFQ","Quotation","Purchase Order","Invoice","Receipt","Delivery Note","Contract","Bank Slip","Other"];
@@ -351,8 +355,32 @@ const SCHEMAS = {
     {k:"unit", l:"Unit", t:"select", opts:["pcs","set","kg","ton","litre","metre","m2","m3","hour","day","month","lump sum","trip","visit"]},
     {k:"category", l:"Group"},
     {k:"salePrice", l:"Selling price", t:"number"}, {k:"costPrice", l:"Purchase price", t:"number"},
+    {k:"isAsset", l:"Buying this creates a fixed asset", t:"select", opts:["No","Yes"]},
+    {k:"lifeYears", l:"Useful life (years, for assets)", t:"number"},
     {k:"notes", l:"Specification / notes", t:"textarea"} ],
-    cols:["code","nameEn","kind","unit","salePrice","costPrice"] },
+    cols:["code","nameEn","kind","unit","salePrice","costPrice","isAsset"] },
+
+  assets: { prefix:"AST", en:"Fixed assets", ar:"الأصول الثابتة", fields:[
+    {k:"tag", l:"Asset tag / code"}, {k:"nameEn", l:"Asset name (English)", req:true},
+    {k:"nameAr", l:"Asset name (Arabic)"},
+    {k:"category", l:"Category", t:"select", opts:ASSET_CATEGORIES},
+    {k:"itemId", l:"Catalogue item", t:"ref", ref:"items"},
+    {k:"serial", l:"Serial / chassis / plate no"},
+    {k:"location", l:"Location"},
+    {k:"custodianId", l:"Custodian (employee)", t:"ref", ref:"employees"},
+    {k:"supplierId", l:"Supplier", t:"ref", ref:"suppliers"},
+    {k:"acquiredOn", l:"Acquisition date", t:"date"},
+    {k:"qty", l:"Quantity", t:"number"},
+    {k:"cost", l:"Acquisition cost", t:"number", req:true},
+    {k:"lifeYears", l:"Useful life (years)", t:"number"},
+    {k:"salvage", l:"Residual value at end of life", t:"number"},
+    {k:"method", l:"Depreciation", t:"select", opts:["Straight line","None"]},
+    {k:"status", l:"Status", t:"select", opts:ASSET_STATUS},
+    {k:"source", l:"Source", t:"select", opts:["Purchased","Opening balance"]},
+    {k:"disposedOn", l:"Disposal / sale date", t:"date"},
+    {k:"disposalValue", l:"Disposal / sale value", t:"number"},
+    {k:"notes", l:"Notes", t:"textarea"} ],
+    cols:["tag","nameEn","category","location","acquiredOn","cost","status"] },
 
   users: { prefix:"USR", en:"Users", ar:"المستخدمون", fields:[
     {k:"nameEn", l:"Full name", req:true}, {k:"nameAr", l:"Full name (Arabic)"},
@@ -375,7 +403,8 @@ const T = {
   ledger:["Transactions","الحركات"], cases:["Procurement files","ملفات المشتريات"],
   masters:["Master data","البيانات الأساسية"], reports:["Reports","التقارير"],
   data:["Backup & sync","النسخ والمزامنة"], users:["Users","المستخدمون"],
-  items:["Products & services","المنتجات والخدمات"], company:["Company profile","بيانات الشركة"],
+  items:["Products & services","المنتجات والخدمات"], assets:["Fixed assets","الأصول الثابتة"],
+  r_asset:["Asset register & depreciation","سجل الأصول والإهلاك"], company:["Company profile","بيانات الشركة"],
   r_item:["Product & service report","تقرير المنتجات والخدمات"],
   r_document:["Official documents","المستندات الرسمية"],
   customers:["Customers","العملاء"], suppliers:["Suppliers","الموردون"],
@@ -385,7 +414,7 @@ const T = {
   r_project:["Project profitability","ربحية المشروع"], r_employee:["Employee report","تقرير الموظفين"],
   r_bank:["Bank & cash ledger","حركة البنوك والنقد"], r_summary:["Financial summary","الملخص المالي"],
   revenue:["Revenue","الإيرادات"], costs:["Costs","التكاليف"], profit:["Net profit","صافي الربح"],
-  cash:["Cash on hand","النقد المتوفر"], ar:["Receivable","ذمم مدينة"], ap:["Payable","ذمم دائنة"],
+  cash:["Cash on hand","النقد المتوفر"], ar:["Receivable","ذمم مدينة"], ap:["Payable","ذمم دائنة"], assets:["Fixed assets","الأصول الثابتة"],
   save:["Save","حفظ"], cancel:["Cancel","إلغاء"], add:["Add","إضافة"], edit:["Edit","تعديل"],
   del:["Delete","حذف"], print:["Print / PDF","طباعة"], search:["Search","بحث"],
   from:["From","من"], to:["To","إلى"], total:["Total","الإجمالي"], balance:["Balance","الرصيد"],
@@ -401,7 +430,7 @@ const t = k => (T[k] ? T[k][LANG === "ar" ? 1 : 0] : k);
 
 const blankDb = () => ({
   meta:{ seq:{}, created:new Date().toISOString(), device:"device-" + Math.random().toString(36).slice(2,8) },
-  users:[], items:[], customers:[], suppliers:[], employees:[], projects:[], accounts:[], categories:[], transactions:[]
+  users:[], items:[], assets:[], customers:[], suppliers:[], employees:[], projects:[], accounts:[], categories:[], transactions:[]
 });
 
 let DB = load();
@@ -536,7 +565,16 @@ function saveFile(filename, content, mime = "application/json") {
 
 const flowOf = tx => typeOf(tx.type).flow || "";
 const isRevenue = tx => flowOf(tx) === "revenue";
-const isCost    = tx => flowOf(tx) === "cost" || flowOf(tx) === "cost_cash_out";
+/* Buying a fixed asset is capital expenditure, not a cost of the period: it does
+   not reduce profit — depreciation does, spread over the asset's life. The money
+   and the supplier balance still move exactly as before. */
+const isCapital = tx => tx.isAsset === "Yes" &&
+  (flowOf(tx) === "cost" || flowOf(tx) === "cost_cash_out");
+const isCost    = tx => !isCapital(tx) &&
+  (flowOf(tx) === "cost" || flowOf(tx) === "cost_cash_out");
+/* What the supplier billed us — an asset purchase is still a debt to pay, even
+   though it never touches the profit for the period. */
+const isBilled  = tx => flowOf(tx) === "cost" || flowOf(tx) === "cost_cash_out";
 const isCashIn  = tx => flowOf(tx) === "cash_in";
 const isCashOut = tx => flowOf(tx) === "cash_out" || flowOf(tx) === "cost_cash_out";
 const amountOf  = tx => num(tx.debit) + num(tx.credit);
@@ -575,8 +613,50 @@ function customerBalance(cusId, upto) {
 function supplierBalance(supId, upto) {
   const s = byId("suppliers", supId); if (!s) return 0;
   const list = txs({ supplierId:supId, to:upto });
-  return num(s.opening) + sum(list.filter(isCost), amountOf) - sum(list.filter(isCashOut), amountOf);
+  return num(s.opening) + sum(list.filter(isBilled), amountOf) - sum(list.filter(isCashOut), amountOf);
 }
+/* ---------- fixed assets & depreciation (straight line) ---------- */
+
+const monthsBetween = (from, to) => {
+  if (!from || !to) return 0;
+  const a = new Date(from), b = new Date(to);
+  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) +
+         (b.getDate() >= a.getDate() ? 0 : -1);
+};
+const assetLive = a => ASSET_LIVE.includes(a.status || "In use");
+
+/** Monthly charge, or 0 when the asset is not depreciated. */
+function monthlyDepn(a) {
+  if ((a.method || "Straight line") === "None") return 0;
+  const life = num(a.lifeYears);
+  if (life <= 0) return 0;
+  const base = num(a.cost) - num(a.salvage);
+  return base > 0 ? base / (life * 12) : 0;
+}
+/** Depreciation accumulated from acquisition up to `upto` (default: today). */
+function accumDepn(a, upto) {
+  const m = monthlyDepn(a);
+  if (!m) return 0;
+  const end = a.disposedOn && (!upto || a.disposedOn < upto) ? a.disposedOn : (upto || today());
+  const months = monthsBetween(a.acquiredOn, end);
+  return Math.min(num(a.cost) - num(a.salvage), Math.max(0, months) * m);
+}
+const netBookValue = (a, upto) =>
+  (a.status === "Disposed" || a.status === "Sold") && (!upto || (a.disposedOn && a.disposedOn <= upto))
+    ? 0 : num(a.cost) - accumDepn(a, upto);
+/** Charge falling inside a reporting period. */
+const depnInPeriod = (a, from, to) =>
+  Math.max(0, accumDepn(a, to || today()) - (from ? accumDepn(a, from) : 0));
+
+const totalAssetCost = upto => rowsOf("assets")
+  .filter(a => !upto || !a.acquiredOn || a.acquiredOn <= upto)
+  .filter(a => assetLive(a)).reduce((s,a) => s + num(a.cost), 0);
+const totalNBV = upto => rowsOf("assets")
+  .filter(a => !upto || !a.acquiredOn || a.acquiredOn <= upto)
+  .filter(a => assetLive(a)).reduce((s,a) => s + netBookValue(a, upto), 0);
+const periodDepn = (from, to) => rowsOf("assets").reduce((s,a) => s + depnInPeriod(a, from, to), 0);
+
 const totalCash = () => rowsOf("accounts").reduce((s,a) => s + accountBalance(a.id), 0);
 const totalAR = () => rowsOf("customers").reduce((s,c) => s + customerBalance(c.id), 0);
 const totalAP = () => rowsOf("suppliers").reduce((s,x) => s + supplierBalance(x.id), 0);
@@ -590,7 +670,7 @@ const NAV = [
     { id:"dashboard", label:"dashboard" }, { id:"daily", label:"daily" },
     { id:"ledger", label:"ledger" }, { id:"cases", label:"cases" } ] },
   { group:"Master data", items:[
-    { id:"m_items", label:"items" },
+    { id:"m_items", label:"items" }, { id:"m_assets", label:"assets" },
     { id:"m_customers", label:"customers" }, { id:"m_suppliers", label:"suppliers" },
     { id:"m_employees", label:"employees" }, { id:"m_projects", label:"projects" },
     { id:"m_accounts", label:"accounts" }, { id:"m_categories", label:"categories" } ] },
@@ -598,7 +678,8 @@ const NAV = [
     { id:"r_summary", label:"r_summary" }, { id:"r_customer", label:"r_customer" },
     { id:"r_supplier", label:"r_supplier" }, { id:"r_project", label:"r_project" },
     { id:"r_employee", label:"r_employee" }, { id:"r_bank", label:"r_bank" },
-    { id:"r_item", label:"r_item" }, { id:"r_document", label:"r_document" } ] },
+    { id:"r_item", label:"r_item" }, { id:"r_asset", label:"r_asset" },
+    { id:"r_document", label:"r_document" } ] },
   { group:"System", items:[ { id:"m_users", label:"users", admin:true },
     { id:"company", label:"company", admin:true }, { id:"data", label:"data" } ] }
 ];
@@ -681,7 +762,8 @@ function viewDashboard(m) {
   const all = txs();
   const revenue = sum(all.filter(isRevenue), amountOf);
   const cost    = sum(all.filter(isCost), amountOf);
-  const profit  = revenue - cost;
+  const depn    = periodDepn("", today());
+  const profit  = revenue - cost - depn;
 
   pageHead(m, t("dashboard"), COMPANY.name);
   printHeader(m, "Management dashboard");
@@ -691,10 +773,12 @@ function viewDashboard(m) {
     `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="n">${esc(note || "")}</div>`));
   kpi(t("revenue"), fmt0(revenue), "Customer invoices issued");
   kpi(t("costs"), fmt0(cost), "Supplier bills, expenses, salaries");
-  kpi(t("profit"), fmt0(profit), "Revenue − costs", profit >= 0 ? "good" : "crit");
+  kpi(t("profit"), fmt0(profit), "Revenue − costs − depreciation", profit >= 0 ? "good" : "crit");
   kpi(t("cash"), fmt0(totalCash()), "All bank & cash accounts");
   kpi(t("ar"), fmt0(totalAR()), "Owed to us by customers");
   kpi(t("ap"), fmt0(totalAP()), "Owed by us to suppliers");
+  if (rowsOf("assets").length)
+    kpi(t("assets"), fmt0(totalNBV()), `Net book value · cost ${fmt0(totalAssetCost())}`);
   m.appendChild(kpis);
 
   /* monthly trend */
@@ -833,6 +917,10 @@ function viewDaily(m) {
   g.appendChild(fld("Unit price | سعر الوحدة", `<input type="number" step="0.01" min="0" name="unitPrice" placeholder="0.00">`));
   g.appendChild(fld("Amount | المبلغ", `<input type="number" step="0.01" min="0" name="amount" value="${
     d.amount || ""}" placeholder="0.00">`));
+  g.appendChild(fld("Is this a fixed asset? | أصل ثابت؟",
+    `<select name="isAsset"><option>No</option><option>Yes</option></select>`));
+  g.appendChild(fld("Asset tag / serial | رقم الأصل", `<input name="assetTag" placeholder="added to the asset register">`));
+  g.appendChild(fld("Location | الموقع", `<input name="assetLocation" placeholder="office, store, site">`));
   g.appendChild(fld("Status | الحالة",
     `<select name="status">${STATUSES.map(s => `<option ${s === d.status ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`));
   g.appendChild(fld("Reference no | رقم المرجع", `<input name="refNo" value="${esc(d.refNo || "")}" placeholder="INV-1024 / PO-88">`));
@@ -875,6 +963,8 @@ function viewDaily(m) {
     if (!it) return;
     if (!num(form.qty.value)) form.qty.value = 1;
     form.unitPrice.value = priceForType(it) || "";
+    // catalogue items marked as assets pre-tick the flag on a purchase
+    if (it.isAsset === "Yes" && isPurchase(form.type.value)) form.isAsset.value = "Yes";
     recalc();
   };
   form.qty.oninput = recalc;
@@ -890,20 +980,24 @@ function viewDaily(m) {
     const amount = num(f.amount);
     if (ty.fin && amount <= 0) return toast("Enter an amount greater than zero.");
     if (ty.cash && !f.accountId) return toast("Select the bank or cash account used.");
+    if (f.isAsset === "Yes" && !isPurchase(f.type))
+      return toast("Only a purchase (supplier bill, expense or payment out) can create an asset.");
     const now = new Date().toISOString();
     const tx = {
       id: nextId("TRX"), date:f.date, type:f.type, phase:f.phase, caseNo:f.caseNo.trim(),
       customerId:f.customerId, supplierId:f.supplierId, employeeId:f.employeeId,
       projectId:f.projectId, accountId:f.accountId, categoryId:f.categoryId,
-      itemId:f.itemId, qty:num(f.qty), unitPrice:num(f.unitPrice),
+      itemId:f.itemId, qty:num(f.qty), unitPrice:num(f.unitPrice), isAsset:f.isAsset,
       debit: ty.side === "debit" ? amount : 0,
       credit: ty.side === "credit" ? amount : 0,
       status:f.status, refNo:f.refNo, docType:f.docType, docRef:f.docRef, notes:f.notes,
       createdBy:(USER ? USER.username : ""), createdAt:now, updatedAt:now
     };
-    DB.transactions.push(tx); save();
+    DB.transactions.push(tx);
+    const asset = f.isAsset === "Yes" ? registerAssetFrom(tx, f) : null;
+    save();
     entryDraft = { date:f.date, type:f.type, caseNo:f.caseNo, status:"Draft" };
-    toast(`Saved ${tx.id}`);
+    toast(asset ? `Saved ${tx.id} · asset ${asset.id} added to the register` : `Saved ${tx.id}`);
     render();
   };
 
@@ -913,6 +1007,38 @@ function viewDaily(m) {
   c2.appendChild(el("h2", {}, "Last 12 entries"));
   c2.appendChild(txTable(recent));
   m.appendChild(c2);
+}
+
+/** Purchase-side transactions are the ones that can bring an asset into the company. */
+const isPurchase = type => ["INVOICE IN","EXPENSE","PAYMENT OUT"].includes(type);
+
+/** Creates the asset register entry behind a purchase marked as a fixed asset. */
+function registerAssetFrom(tx, f) {
+  const it = byId("items", tx.itemId);
+  const now = new Date().toISOString();
+  const asset = {
+    id: nextId("AST"),
+    tag: (f.assetTag || "").trim(),
+    nameEn: it ? it.nameEn : (f.notes || "Asset from " + tx.id),
+    nameAr: it ? it.nameAr || "" : "",
+    category: it && /vehicle/i.test(it.category || "") ? "Vehicles" : "Other",
+    itemId: tx.itemId || "",
+    serial: (f.assetTag || "").trim(),
+    location: (f.assetLocation || "").trim(),
+    supplierId: tx.supplierId || "",
+    acquiredOn: tx.date,
+    qty: num(tx.qty) || 1,
+    cost: amountOf(tx),
+    lifeYears: it ? num(it.lifeYears) || 5 : 5,
+    salvage: 0,
+    method: "Straight line",
+    status: "In use",
+    source: "Purchased",
+    sourceTx: tx.id,
+    createdAt: now, updatedAt: now
+  };
+  DB.assets.push(asset);
+  return asset;
 }
 
 function fld(label, inner) {
@@ -1032,7 +1158,7 @@ function viewLedger(m) {
 
 function exportTransactionsCsv() {
   const cols = ["id","date","type","phase","caseNo","customerId","supplierId","employeeId","projectId",
-                "accountId","categoryId","itemId","qty","unitPrice","debit","credit","status","refNo",
+                "accountId","categoryId","itemId","qty","unitPrice","isAsset","debit","credit","status","refNo",
                 "docType","docRef","notes","createdBy"];
   const refTbl = { customerId:"customers", supplierId:"suppliers", employeeId:"employees",
                    projectId:"projects", accountId:"accounts", categoryId:"categories", itemId:"items" };
@@ -1243,7 +1369,7 @@ let rep = { from:"", to:"", entity:"" };
 function viewReport(m, kind) {
   const titles = { summary:t("r_summary"), customer:t("r_customer"), supplier:t("r_supplier"),
                    project:t("r_project"), employee:t("r_employee"), bank:t("r_bank"),
-                   item:t("r_item"), document:t("r_document") };
+                   item:t("r_item"), asset:t("r_asset"), document:t("r_document") };
   pageHead(m, titles[kind], CO().name, [{ label:t("print"), cls:"gold", on:() => window.print() }]);
   // official documents carry their own letterhead
   if (kind !== "document") printHeader(m, titles[kind], `${rep.from || "start"} → ${rep.to || today()}`);
@@ -1252,7 +1378,7 @@ function viewReport(m, kind) {
   bar.appendChild(fld("From | من", `<input type="date" id="r_from" value="${esc(rep.from)}">`));
   bar.appendChild(fld("To | إلى", `<input type="date" id="r_to" value="${esc(rep.to)}">`));
   const entTbl = { customer:"customers", supplier:"suppliers", project:"projects",
-                   employee:"employees", bank:"accounts", item:"items" }[kind];
+                   employee:"employees", bank:"accounts", item:"items", asset:"assets" }[kind];
   if (entTbl) bar.appendChild(fld("Select | اختر",
     `<select id="r_ent"><option value="">— all —</option>${rowsOf(entTbl).map(r =>
       `<option value="${esc(r.id)}" ${r.id === rep.entity ? "selected" : ""}>${esc(r.nameEn)}</option>`).join("")}</select>`));
@@ -1264,6 +1390,7 @@ function viewReport(m, kind) {
   bar.appendChild(go2);
   m.appendChild(bar);
 
+  if (kind === "asset")    return repAssets(m);
   if (kind === "item")     return repItems(m);
   if (kind === "document") return repDocuments(m);
   if (kind === "summary")  return repSummary(m);
@@ -1272,6 +1399,79 @@ function viewReport(m, kind) {
   if (kind === "project")  return repProject(m);
   if (kind === "employee") return repEmployee(m);
   if (kind === "bank")     return repBank(m);
+}
+
+/* ---- fixed asset register & depreciation ---- */
+
+function repAssets(m) {
+  const all = rowsOf("assets");
+  if (!all.length) {
+    m.appendChild(el("div", { class:"card" }, `<div class="empty">
+      No assets yet. Add the ones you already own under Master data → Fixed assets,
+      or tick "Is this a fixed asset?" when entering a purchase.</div>`));
+    return;
+  }
+  const list = rep.entity ? all.filter(a => a.id === rep.entity) : all;
+  const upto = rep.to || today();
+
+  const totals = list.reduce((s,a) => ({
+    cost:s.cost + num(a.cost),
+    period:s.period + depnInPeriod(a, rep.from, upto),
+    accum:s.accum + accumDepn(a, upto),
+    nbv:s.nbv + netBookValue(a, upto)
+  }), { cost:0, period:0, accum:0, nbv:0 });
+
+  const kpis = el("div", { class:"kpis" });
+  const kpi = (k,v,n) => kpis.appendChild(el("div", { class:"kpi" },
+    `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="n">${esc(n)}</div>`));
+  kpi("Acquisition cost", fmt0(totals.cost), `${list.length} assets`);
+  kpi("Depreciation this period", fmt0(totals.period), `${rep.from || "start"} → ${upto}`);
+  kpi("Accumulated depreciation", fmt0(totals.accum), "to " + upto);
+  kpi("Net book value", fmt0(totals.nbv), "cost − accumulated");
+  m.appendChild(kpis);
+
+  const w = el("div", { class:"tablewrap" });
+  w.style.marginTop = "1rem";
+  w.innerHTML = `<table><thead><tr>
+    <th>Tag</th><th>Asset</th><th>Category</th><th>Location</th><th>Custodian</th>
+    <th>Acquired</th><th>Source</th><th class="num">Cost</th><th class="num">Life</th>
+    <th class="num">Depn. period</th><th class="num">Accumulated</th><th class="num">Net book value</th>
+    <th>Status</th></tr></thead><tbody>${
+    list.map(a => `<tr>
+      <td>${esc(a.tag || a.id)}</td><td>${esc(a.nameEn)}</td><td>${esc(a.category || "")}</td>
+      <td>${esc(a.location || "")}</td><td>${esc(nameOf("employees", a.custodianId))}</td>
+      <td>${esc(a.acquiredOn || "")}</td><td>${esc(a.source || "")}</td>
+      <td class="num">${fmt(a.cost)}</td><td class="num">${a.lifeYears ? a.lifeYears + "y" : "—"}</td>
+      <td class="num">${fmt(depnInPeriod(a, rep.from, upto))}</td>
+      <td class="num">${fmt(accumDepn(a, upto))}</td>
+      <td class="num">${fmt(netBookValue(a, upto))}</td>
+      <td><span class="pill ${assetLive(a) ? "approved" : "closed"}">${esc(a.status || "")}</span></td>
+    </tr>`).join("")}</tbody>
+    <tfoot><tr><td colspan="7">${esc(t("total"))}</td>
+      <td class="num">${fmt(totals.cost)}</td><td></td>
+      <td class="num">${fmt(totals.period)}</td><td class="num">${fmt(totals.accum)}</td>
+      <td class="num">${fmt(totals.nbv)}</td><td></td></tr></tfoot></table>`;
+  m.appendChild(w);
+
+  /* by category */
+  const cats = [...new Set(list.map(a => a.category || "Other"))].sort();
+  const c = el("div", { class:"card" });
+  c.appendChild(el("h2", {}, "By category"));
+  const cw = el("div", { class:"tablewrap" });
+  cw.innerHTML = `<table><thead><tr><th>Category</th><th class="num">Count</th>
+    <th class="num">Cost</th><th class="num">Net book value</th></tr></thead><tbody>${
+    cats.map(cat => {
+      const g = list.filter(a => (a.category || "Other") === cat);
+      return `<tr><td>${esc(cat)}</td><td class="num">${g.length}</td>
+        <td class="num">${fmt(g.reduce((s,a) => s + num(a.cost), 0))}</td>
+        <td class="num">${fmt(g.reduce((s,a) => s + netBookValue(a, upto), 0))}</td></tr>`;
+    }).join("")}</tbody></table>`;
+  c.appendChild(cw);
+  m.appendChild(c);
+
+  c.appendChild(el("p", { class:"card-note", style:"margin-top:.7rem" },
+    "Straight line: (cost − residual) ÷ useful life, charged monthly from the acquisition date " +
+    "and stopping at disposal. Assets with no useful life are held at cost."));
 }
 
 /* ---- products & services ---- */
@@ -1443,13 +1643,18 @@ function repSummary(m) {
   const list = txs({ from:rep.from, to:rep.to });
   const revenue = sum(list.filter(isRevenue), amountOf);
   const cost = sum(list.filter(isCost), amountOf);
+  const capex = sum(list.filter(isCapital), amountOf);
+  const depn = periodDepn(rep.from, rep.to || today());
   const cin = sum(list.filter(isCashIn), amountOf), cout = sum(list.filter(isCashOut), amountOf);
   const card = el("div", { class:"card" });
   card.innerHTML = `<h2>Period result</h2>
     <div class="tablewrap"><table><tbody>
       <tr><td>Revenue — customer invoices</td><td class="num">${fmt(revenue)}</td></tr>
       <tr><td>Cost — supplier bills, expenses, salaries</td><td class="num">${fmt(cost)}</td></tr>
-      <tr><td><b>Net profit</b></td><td class="num"><b>${fmt(revenue - cost)}</b></td></tr>
+      <tr><td>Depreciation of fixed assets</td><td class="num">${fmt(depn)}</td></tr>
+      <tr><td><b>Net profit</b></td><td class="num"><b>${fmt(revenue - cost - depn)}</b></td></tr>
+      <tr><td>Capital spending on assets (not a cost)</td><td class="num">${fmt(capex)}</td></tr>
+      <tr><td>Fixed assets at net book value</td><td class="num">${fmt(totalNBV(rep.to))}</td></tr>
       <tr><td>Cash received</td><td class="num">${fmt(cin)}</td></tr>
       <tr><td>Cash paid</td><td class="num">${fmt(cout)}</td></tr>
       <tr><td><b>Net cash movement</b></td><td class="num"><b>${fmt(cin - cout)}</b></td></tr>
@@ -1484,12 +1689,12 @@ function repParty(m, tbl) {
     const before = all.filter(x => rep.from && x.date < rep.from);
     const opening = num(p.opening) +
       (isCus ? sum(before.filter(isRevenue), amountOf) - sum(before.filter(isCashIn), amountOf)
-             : sum(before.filter(isCost), amountOf) - sum(before.filter(isCashOut), amountOf));
+             : sum(before.filter(isBilled), amountOf) - sum(before.filter(isCashOut), amountOf));
     const period = all.filter(x => inRange(x, rep.from, rep.to))
-      .filter(x => isCus ? (isRevenue(x) || isCashIn(x)) : (isCost(x) || isCashOut(x)));
+      .filter(x => isCus ? (isRevenue(x) || isCashIn(x)) : (isBilled(x) || isCashOut(x)));
     let run = opening;
     const body = period.map(x => {
-      const up = isCus ? isRevenue(x) : isCost(x);
+      const up = isCus ? isRevenue(x) : isBilled(x);
       const amt = amountOf(x);
       run += up ? amt : -amt;
       return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}</td><td>${esc(x.refNo || "")}</td>
@@ -1510,7 +1715,7 @@ function repParty(m, tbl) {
       <tbody><tr><td colspan="6">${esc(t("opening"))}</td><td class="num">${fmt(opening)}</td></tr>
       ${body || ""}</tbody>
       <tfoot><tr><td colspan="4">${esc(t("closing"))}</td>
-        <td class="num">${fmt(sum(period.filter(x => isCus ? isRevenue(x) : isCost(x)), amountOf))}</td>
+        <td class="num">${fmt(sum(period.filter(x => isCus ? isRevenue(x) : isBilled(x)), amountOf))}</td>
         <td class="num">${fmt(sum(period.filter(x => isCus ? isCashIn(x) : isCashOut(x)), amountOf))}</td>
         <td class="num">${fmt(run)}</td></tr></tfoot></table>`;
     card.appendChild(w);
@@ -1727,7 +1932,7 @@ function viewData(m) {
   m.appendChild(c3);
 
   const c4 = el("div", { class:"card" });
-  const counts = ["users","items","customers","suppliers","employees","projects","accounts","categories","transactions"]
+  const counts = ["users","items","assets","customers","suppliers","employees","projects","accounts","categories","transactions"]
     .map(k => `<tr><td>${esc(k)}</td><td class="num">${rowsOf(k).length}</td></tr>`).join("");
   c4.innerHTML = `<h2>This device</h2><div class="tablewrap"><table><tbody>${counts}
     <tr><td>Device ID</td><td class="num">${esc(DB.meta.device || "")}</td></tr></tbody></table></div>`;
@@ -1746,7 +1951,7 @@ function viewData(m) {
 
 function mergeDb(incoming) {
   let n = 0;
-  const tables = ["users","items","customers","suppliers","employees","projects","accounts","categories","transactions"];
+  const tables = ["users","items","assets","customers","suppliers","employees","projects","accounts","categories","transactions"];
   tables.forEach(tbl => {
     (incoming[tbl] || []).forEach(r => {
       if (!r || !r.id) return;
