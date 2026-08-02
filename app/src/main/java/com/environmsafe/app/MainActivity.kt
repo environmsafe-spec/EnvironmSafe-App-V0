@@ -113,30 +113,54 @@ class MainActivity : AppCompatActivity() {
 
     /** Writes backups and CSV exports to a real file and offers to share them. */
     inner class FileBridge {
+
+        /** Binary files (Excel) arrive base64-encoded from the page. */
         @JavascriptInterface
-        fun saveFile(name: String, content: String) {
+        fun saveBytes(name: String, base64: String) {
             runOnUiThread {
                 try {
-                    val dir = File(getExternalFilesDir(null), "exports").apply { mkdirs() }
-                    val safeName = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
-                    val out = File(dir, safeName)
-                    out.writeText(content)
-
-                    val uri = FileProvider.getUriForFile(
-                        this@MainActivity, "$packageName.files", out
-                    )
-                    val send = Intent(Intent.ACTION_SEND).apply {
-                        type = if (safeName.endsWith(".csv")) "text/csv" else "application/json"
-                        putExtra(Intent.EXTRA_STREAM, uri)
-                        putExtra(Intent.EXTRA_SUBJECT, safeName)
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    }
-                    startActivity(Intent.createChooser(send, getString(R.string.share_file)))
-                    toast(getString(R.string.saved_to, out.absolutePath))
+                    val bytes = android.util.Base64.decode(base64, android.util.Base64.DEFAULT)
+                    val out = writeExport(name) { it.write(bytes) }
+                    shareExport(out)
                 } catch (e: Exception) {
                     toast(getString(R.string.save_failed, e.message ?: ""))
                 }
             }
         }
+
+        @JavascriptInterface
+        fun saveFile(name: String, content: String) {
+            runOnUiThread {
+                try {
+                    shareExport(writeExport(name) { it.write(content.toByteArray()) })
+                } catch (e: Exception) {
+                    toast(getString(R.string.save_failed, e.message ?: ""))
+                }
+            }
+        }
+    }
+
+    private fun writeExport(name: String, body: (java.io.OutputStream) -> Unit): File {
+        val dir = File(getExternalFilesDir(null), "exports").apply { mkdirs() }
+        val out = File(dir, name.replace(Regex("[^A-Za-z0-9._-]"), "_"))
+        out.outputStream().use(body)
+        return out
+    }
+
+    private fun shareExport(out: File) {
+        val uri = FileProvider.getUriForFile(this, "$packageName.files", out)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = when {
+                out.name.endsWith(".csv") -> "text/csv"
+                out.name.endsWith(".xlsx") ->
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                else -> "application/json"
+            }
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, out.name)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(send, getString(R.string.share_file)))
+        toast(getString(R.string.saved_to, out.absolutePath))
     }
 }

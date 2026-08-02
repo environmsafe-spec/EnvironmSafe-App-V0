@@ -145,17 +145,25 @@ types, and skips empty template rows and spreadsheet total rows. Imported record
 are numbered from 1001 so they can never collide with records already on the
 device.
 
-### Official documents
+### Official documents — PDF and Excel
 
-**Reports → Official documents** turns the lines sharing a reference number into a
-printable document on company letterhead: logo, legal name in English and Arabic,
-activity, address, contacts, tax and registration numbers, then the customer's
-details, the numbered item lines with units and prices, totals, the bank account
-for payment, and signature blocks for prepared / approved / received. Quotation,
-invoice, purchase order and voucher titles follow the transaction type.
+**Reports → Official documents**, or the **Form** link on any transaction row,
+prints the lines sharing a reference number as the company's own form:
+letterhead, BILL TO block, document number, date, customer ID, terms, PO number,
+the PAYMENT VIA bank details on invoices, then SN / Description / Unit / Qty /
+Unit price / Discount / Amount, followed by subtotal, discount, VAT, shipping and
+total, the validity and delivery notes, and prepared / approved / received
+signatures.
 
-Edit the letterhead under **System → Company profile** — every report and document
-picks it up, and the logo can be replaced there too.
+- **Print / PDF** — the browser's print dialogue, then *Save as PDF*.
+- **Download Excel** — the same form as a real `.xlsx`, written by the app
+  itself, ready to edit or email.
+- **Document details** — terms, PO number, customer ID, a discount on the whole
+  document, VAT rate, shipping cost, validity and delivery notes. These belong to
+  the document rather than to any single line.
+
+Defaults for terms, validity, delivery, VAT and the PAYMENT VIA bank details live
+in **System → Company profile**, so every new document starts correct.
 
 ### Reports
 
