@@ -118,24 +118,6 @@ it settles.
 A return does not delete the original invoice — both stay on the record, which is
 how an audit expects to see it.
 
-### Returns and refunds
-
-When a customer sends goods or services back, enter a **SALES RETURN** — a credit
-note. It reduces the sale and reduces what that customer owes. If you then give
-the money back, enter a **REFUND TO CUSTOMER**, which takes the cash out and
-clears the credit.
-
-When the company returns to a supplier, it is a **PURCHASE RETURN** — a debit
-note — reducing the purchase and what is owed. Money coming back from the
-supplier is a **REFUND FROM SUPPLIER**.
-
-Put the original invoice number in **Against document** so the return can be
-traced to what it reverses; it appears beside the line on the statement. Pick the
-product and quantity and the value is priced from the catalogue, so returned
-quantities come off the product report too. Revenue, cost, profit, customer and
-supplier balances are all reported net of returns, and credit and debit notes
-print as their own documents on the company letterhead.
-
 ### Currencies
 
 Accounts hold USD, SAR, YER or AED and **money is never added across
