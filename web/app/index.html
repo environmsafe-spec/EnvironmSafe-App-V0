@@ -291,6 +291,10 @@ const TXTYPES = [
   { v:"PO OUT",         ar:"أمر شراء صادر",     phase:"PO OUT",         party:"supplier", fin:false },
   { v:"INVOICE OUT",    ar:"فاتورة مبيعات",     phase:"INVOICE OUT",    party:"customer", fin:true, side:"credit", flow:"revenue" },
   { v:"INVOICE IN",     ar:"فاتورة مشتريات",    phase:"INVOICE IN",     party:"supplier", fin:true, side:"debit",  flow:"cost" },
+  { v:"SALES RETURN",   ar:"مرتجع مبيعات",      phase:"INVOICE OUT",    party:"customer", fin:true, side:"debit",  flow:"revenue_return", against:1 },
+  { v:"PURCHASE RETURN",ar:"مرتجع مشتريات",     phase:"INVOICE IN",     party:"supplier", fin:true, side:"credit", flow:"cost_return",    against:1 },
+  { v:"REFUND TO CUSTOMER",  ar:"استرداد للعميل",  phase:"PAYMENT",     party:"customer", fin:true, side:"debit",  flow:"cash_out", cash:true, against:1 },
+  { v:"REFUND FROM SUPPLIER",ar:"استرداد من المورد",phase:"PAYMENT",    party:"supplier", fin:true, side:"credit", flow:"cash_in",  cash:true, against:1 },
   { v:"RECEIPT",        ar:"سند قبض",           phase:"PAYMENT",        party:"customer", fin:true, side:"credit", flow:"cash_in",  cash:true },
   { v:"PAYMENT OUT",    ar:"سند صرف",           phase:"PAYMENT",        party:"supplier", fin:true, side:"debit",  flow:"cash_out", cash:true },
   { v:"EXPENSE",        ar:"مصروف",             phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cost_cash_out", cash:true },
@@ -581,6 +585,19 @@ const isCost    = tx => !isCapital(tx) &&
 /* What the supplier billed us — an asset purchase is still a debt to pay, even
    though it never touches the profit for the period. */
 const isBilled  = tx => flowOf(tx) === "cost" || flowOf(tx) === "cost_cash_out";
+
+/* Returns. A customer sending goods back reduces what we sold and what they owe;
+   returning goods to a supplier reduces what we bought and what we owe them.
+   A refund is the money afterwards, and settles the balance the return created. */
+const isSalesReturn    = tx => flowOf(tx) === "revenue_return";
+const isPurchaseReturn = tx => flowOf(tx) === "cost_return";
+const isRefundOut      = tx => tx.type === "REFUND TO CUSTOMER";
+const isRefundIn       = tx => tx.type === "REFUND FROM SUPPLIER";
+
+/** Sales less what came back. */
+const netRevenue = list => sum(list.filter(isRevenue), amountOf) - sum(list.filter(isSalesReturn), amountOf);
+/** Purchases less what we sent back. */
+const netCost    = list => sum(list.filter(isCost), amountOf) - sum(list.filter(isPurchaseReturn), amountOf);
 const isCashIn  = tx => flowOf(tx) === "cash_in";
 const isCashOut = tx => flowOf(tx) === "cash_out" || flowOf(tx) === "cost_cash_out";
 const amountOf  = tx => num(tx.debit) + num(tx.credit);
@@ -649,13 +666,21 @@ function customerBalance(cusId, upto, cur) {
   const c = byId("customers", cusId); if (!c) return 0;
   const list = txs({ customerId:cusId, to:upto, currency:cur === undefined ? CUR : cur });
   const opening = (cur === undefined ? CUR : cur) && (cur || CUR) !== (CO().currency || "YER") ? 0 : num(c.opening);
-  return opening + sum(list.filter(isRevenue), amountOf) - sum(list.filter(isCashIn), amountOf);
+  //  invoiced − returned − received + refunded back to them
+  return opening + sum(list.filter(isRevenue), amountOf)
+                 - sum(list.filter(isSalesReturn), amountOf)
+                 - sum(list.filter(isCashIn), amountOf)
+                 + sum(list.filter(isRefundOut), amountOf);
 }
 function supplierBalance(supId, upto, cur) {
   const s = byId("suppliers", supId); if (!s) return 0;
   const list = txs({ supplierId:supId, to:upto, currency:cur === undefined ? CUR : cur });
   const opening = (cur === undefined ? CUR : cur) && (cur || CUR) !== (CO().currency || "YER") ? 0 : num(s.opening);
-  return opening + sum(list.filter(isBilled), amountOf) - sum(list.filter(isCashOut), amountOf);
+  //  billed − returned − paid + refunded back to us
+  return opening + sum(list.filter(isBilled), amountOf)
+                 - sum(list.filter(isPurchaseReturn), amountOf)
+                 - sum(list.filter(isCashOut), amountOf)
+                 + sum(list.filter(isRefundIn), amountOf);
 }
 /** Refundable guarantees and deposits we are holding out with someone else. */
 const depositsHeld = (upto, cur) => {
@@ -811,8 +836,8 @@ function printHeader(parent, title, sub) {
 /** The KPI row on its own, so the per-currency blocks can reuse it. */
 function dashboardKpis(parent) {
   const all = txs();
-  const revenue = sum(all.filter(isRevenue), amountOf);
-  const cost    = sum(all.filter(isCost), amountOf);
+  const revenue = netRevenue(all);
+  const cost    = netCost(all);
   const depn    = periodDepn("", today());
   const profit  = revenue - cost - depn;
   const kpis = el("div", { class:"kpis" });
@@ -850,8 +875,8 @@ function viewDashboard(m) {
     CUR = list[0] || CO().currency || "YER";
   }
   const all = txs();
-  const revenue = sum(all.filter(isRevenue), amountOf);
-  const cost    = sum(all.filter(isCost), amountOf);
+  const revenue = netRevenue(all);
+  const cost    = netCost(all);
   const depn    = periodDepn("", today());
   const profit  = revenue - cost - depn;
 
@@ -1016,6 +1041,8 @@ function viewDaily(m) {
   g.appendChild(fld("Status | الحالة",
     `<select name="status">${STATUSES.map(s => `<option ${s === d.status ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`));
   g.appendChild(fld("Reference no | رقم المرجع", `<input name="refNo" value="${esc(d.refNo || "")}" placeholder="INV-1024 / PO-88">`));
+  g.appendChild(fld("Against document | مقابل مستند",
+    `<input name="againstRef" placeholder="original invoice being returned or refunded">`));
   g.appendChild(fld("Document type | نوع المستند",
     `<select name="docType"><option value=""></option>${DOCTYPES.map(x => `<option>${esc(x)}</option>`).join("")}</select>`));
   g.appendChild(fld("Document file / link | المستند", `<input name="docRef" placeholder="quotation-1024.pdf or Drive link">`));
@@ -1035,7 +1062,12 @@ function viewDaily(m) {
   const syncHint = () => {
     const ty = typeOf(form.type.value);
     form.phase.value = ty.phase;
-    hint.textContent = ty.fin
+    const rt = { "SALES RETURN":"Reduces sales and what this customer owes.",
+                 "PURCHASE RETURN":"Reduces purchases and what we owe this supplier.",
+                 "REFUND TO CUSTOMER":"Money paid back to the customer, settling their credit.",
+                 "REFUND FROM SUPPLIER":"Money received back from the supplier." }[ty.v];
+    hint.textContent = rt ? rt + (ty.cash ? " Moves the selected account." : "")
+      : ty.fin
       ? `Amount will be posted to the ${ty.side.toUpperCase()} column` + (ty.cash ? " and will move the selected account." : ".")
       : "No financial posting — this is a procurement document only.";
   };
@@ -1083,7 +1115,7 @@ function viewDaily(m) {
       currency:(byId("accounts", f.accountId) || {}).currency || CO().currency || "YER",
       debit: ty.side === "debit" ? amount : 0,
       credit: ty.side === "credit" ? amount : 0,
-      status:f.status, refNo:f.refNo, docType:f.docType, docRef:f.docRef, notes:f.notes,
+      status:f.status, refNo:f.refNo, againstRef:f.againstRef, docType:f.docType, docRef:f.docRef, notes:f.notes,
       createdBy:(USER ? USER.username : ""), createdAt:now, updatedAt:now
     };
     DB.transactions.push(tx);
@@ -1251,7 +1283,7 @@ function viewLedger(m) {
 
 function exportTransactionsCsv() {
   const cols = ["id","date","type","phase","caseNo","customerId","supplierId","employeeId","projectId",
-                "accountId","categoryId","itemId","qty","unitPrice","isAsset","debit","credit","status","refNo",
+                "accountId","categoryId","itemId","qty","unitPrice","isAsset","debit","credit","status","refNo","againstRef",
                 "docType","docRef","notes","createdBy"];
   const refTbl = { customerId:"customers", supplierId:"suppliers", employeeId:"employees",
                    projectId:"projects", accountId:"accounts", categoryId:"categories", itemId:"items" };
@@ -1279,7 +1311,7 @@ function viewCases(m) {
   cases.forEach(cn => {
     const list = DB.transactions.filter(x => x.caseNo === cn)
       .sort((a,b) => (a.date + a.id).localeCompare(b.date + b.id));
-    const rev = sum(list.filter(isRevenue), amountOf), cst = sum(list.filter(isCost), amountOf);
+    const rev = netRevenue(list), cst = netCost(list);
     const card = el("div", { class:"card" });
     card.appendChild(el("h2", {}, esc(cn)));
     card.appendChild(el("div", { class:"card-note" },
@@ -1586,8 +1618,13 @@ function repItems(m) {
     const sold   = mine.filter(x => x.type === "INVOICE OUT");
     const bought = mine.filter(x => x.type === "INVOICE IN");
     const quoted = mine.filter(x => x.type === "QUOTATION OUT");
-    const qSold = sum(sold, x => x.qty), qBought = sum(bought, x => x.qty);
-    const rev = sum(sold, amountOf), cost = sum(bought, amountOf);
+    // quantities and values are net of what came back
+    const backIn  = mine.filter(isSalesReturn);
+    const backOut = mine.filter(isPurchaseReturn);
+    const qSold   = sum(sold, x => x.qty) - sum(backIn, x => x.qty);
+    const qBought = sum(bought, x => x.qty) - sum(backOut, x => x.qty);
+    const rev  = sum(sold, amountOf) - sum(backIn, amountOf);
+    const cost = sum(bought, amountOf) - sum(backOut, amountOf);
     return { it, quoted:quoted.length, qSold, qBought, rev, cost,
              avg: qSold ? rev / qSold : 0, profit: rev - cost };
   });
@@ -1636,6 +1673,8 @@ function repItems(m) {
 
 const DOC_TITLE = {
   "QUOTATION OUT":"Quotation", "INVOICE OUT":"Tax Invoice", "PO OUT":"Purchase Order",
+  "SALES RETURN":"Credit Note", "PURCHASE RETURN":"Debit Note",
+  "REFUND TO CUSTOMER":"Refund Voucher", "REFUND FROM SUPPLIER":"Refund Received",
   "RFQ OUT":"Request for Quotation", "INVOICE IN":"Supplier Invoice",
   "QUOTATION IN":"Supplier Quotation", "PO IN":"Customer Purchase Order",
   "RECEIPT":"Receipt Voucher", "PAYMENT OUT":"Payment Voucher"
@@ -1734,16 +1773,20 @@ function officialDoc(lines, refNo) {
 
 function repSummary(m) {
   const list = txs({ from:rep.from, to:rep.to });
-  const revenue = sum(list.filter(isRevenue), amountOf);
-  const cost = sum(list.filter(isCost), amountOf);
+  const revenue = netRevenue(list);
+  const cost = netCost(list);
+  const salesReturns = sum(list.filter(isSalesReturn), amountOf);
+  const purchaseReturns = sum(list.filter(isPurchaseReturn), amountOf);
   const capex = sum(list.filter(isCapital), amountOf);
   const depn = periodDepn(rep.from, rep.to || today());
   const cin = sum(list.filter(isCashIn), amountOf), cout = sum(list.filter(isCashOut), amountOf);
   const card = el("div", { class:"card" });
   card.innerHTML = `<h2>Period result${esc(curSuffix())}</h2>
     <div class="tablewrap"><table><tbody>
-      <tr><td>Revenue — customer invoices</td><td class="num">${fmt(revenue)}</td></tr>
-      <tr><td>Cost — supplier bills, expenses, salaries</td><td class="num">${fmt(cost)}</td></tr>
+      <tr><td>Revenue — customer invoices, net of returns</td><td class="num">${fmt(revenue)}</td></tr>
+      <tr><td>&nbsp;&nbsp;of which returned by customers</td><td class="num">${fmt(salesReturns)}</td></tr>
+      <tr><td>Cost — supplier bills, expenses, salaries, net of returns</td><td class="num">${fmt(cost)}</td></tr>
+      <tr><td>&nbsp;&nbsp;of which returned to suppliers</td><td class="num">${fmt(purchaseReturns)}</td></tr>
       <tr><td>Depreciation of fixed assets</td><td class="num">${fmt(depn)}</td></tr>
       <tr><td><b>Net profit</b></td><td class="num"><b>${fmt(revenue - cost - depn)}</b></td></tr>
       <tr><td>Capital spending on assets (not a cost)</td><td class="num">${fmt(capex)}</td></tr>
@@ -1782,17 +1825,23 @@ function repParty(m, tbl) {
     const key = isCus ? "customerId" : "supplierId";
     const all = txs({ [key]:p.id });
     const before = all.filter(x => rep.from && x.date < rep.from);
+    // charges raise the balance, settlements lower it; a return is a settlement,
+    // a refund undoes one
+    const charge  = x => isCus ? (isRevenue(x) || isRefundOut(x)) : (isBilled(x) || isRefundIn(x));
+    const settle  = x => isCus ? (isCashIn(x) || isSalesReturn(x)) : (isCashOut(x) || isPurchaseReturn(x));
+    const relevant = x => charge(x) || settle(x);
     const opening = num(p.opening) +
-      (isCus ? sum(before.filter(isRevenue), amountOf) - sum(before.filter(isCashIn), amountOf)
-             : sum(before.filter(isBilled), amountOf) - sum(before.filter(isCashOut), amountOf));
-    const period = all.filter(x => inRange(x, rep.from, rep.to))
-      .filter(x => isCus ? (isRevenue(x) || isCashIn(x)) : (isBilled(x) || isCashOut(x)));
+      sum(before.filter(charge), amountOf) - sum(before.filter(settle), amountOf);
+    const period = all.filter(x => inRange(x, rep.from, rep.to)).filter(relevant);
     let run = opening;
     const body = period.map(x => {
-      const up = isCus ? isRevenue(x) : isBilled(x);
+      const up = charge(x);
       const amt = amountOf(x);
       run += up ? amt : -amt;
-      return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}</td><td>${esc(x.refNo || "")}</td>
+      const ret = isSalesReturn(x) || isPurchaseReturn(x);
+      return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}${
+          ret && x.againstRef ? ` <small>vs ${esc(x.againstRef)}</small>` : ""}</td>
+        <td>${esc(x.refNo || "")}</td>
         <td>${esc(x.caseNo || "")}</td>
         <td class="num">${up ? fmt(amt) : ""}</td><td class="num">${up ? "" : fmt(amt)}</td>
         <td class="num">${fmt(run)}</td></tr>`;
@@ -1805,13 +1854,13 @@ function repParty(m, tbl) {
     w.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
       <th>${esc(t("ref"))}</th><th>Case</th>
       <th class="num">${isCus ? "Invoiced" : "Billed"}</th>
-      <th class="num">${isCus ? "Received" : "Paid"}</th>
+      <th class="num">${isCus ? "Received / returned" : "Paid / returned"}</th>
       <th class="num">${esc(t("balance"))}</th></tr></thead>
       <tbody><tr><td colspan="6">${esc(t("opening"))}</td><td class="num">${fmt(opening)}</td></tr>
       ${body || ""}</tbody>
       <tfoot><tr><td colspan="4">${esc(t("closing"))}</td>
-        <td class="num">${fmt(sum(period.filter(x => isCus ? isRevenue(x) : isBilled(x)), amountOf))}</td>
-        <td class="num">${fmt(sum(period.filter(x => isCus ? isCashIn(x) : isCashOut(x)), amountOf))}</td>
+        <td class="num">${fmt(sum(period.filter(charge), amountOf))}</td>
+        <td class="num">${fmt(sum(period.filter(settle), amountOf))}</td>
         <td class="num">${fmt(run)}</td></tr></tfoot></table>`;
     card.appendChild(w);
     m.appendChild(card);
@@ -1824,7 +1873,7 @@ function repProject(m) {
   if (!list.length) { w.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; m.appendChild(w); return; }
   const rows = list.map(p => {
     const l = txs({ projectId:p.id, from:rep.from, to:rep.to });
-    const rev = sum(l.filter(isRevenue), amountOf), cst = sum(l.filter(isCost), amountOf);
+    const rev = netRevenue(l), cst = netCost(l);
     const margin = rev ? ((rev - cst) / rev * 100) : 0;
     return `<tr><td>${esc(p.nameEn)}</td><td>${esc(nameOf("customers", p.customerId))}</td>
       <td>${esc(p.status || "")}</td><td class="num">${fmt(p.budget)}</td>

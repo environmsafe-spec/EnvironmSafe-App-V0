@@ -97,6 +97,27 @@ still leaves the bank and the supplier is still owed exactly as before — only 
 profit treatment differs. The financial summary shows capital spending and
 depreciation on separate lines so both are visible.
 
+### Returns and refunds
+
+A customer sending goods back, or goods we send back to a supplier, are recorded
+with four transaction types:
+
+| Type | Document | Effect |
+|---|---|---|
+| Sales return | Credit Note | reduces sales and what the customer owes |
+| Purchase return | Debit Note | reduces purchases and what we owe the supplier |
+| Refund to customer | Refund Voucher | money paid back, settling the credit |
+| Refund from supplier | Refund Received | money received back |
+
+Put the original invoice number in **Against document** so the return is
+traceable, and pick the product to net the returned quantity off that item's
+sales. Revenue, cost, profit, project margins and the product report are all
+reported **net of returns**, and statements show the return against the balance
+it settles.
+
+A return does not delete the original invoice — both stay on the record, which is
+how an audit expects to see it.
+
 ### Currencies
 
 Accounts hold USD, SAR, YER or AED and **money is never added across
