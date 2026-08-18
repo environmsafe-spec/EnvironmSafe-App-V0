@@ -118,6 +118,23 @@ it settles.
 A return does not delete the original invoice — both stay on the record, which is
 how an audit expects to see it.
 
+### Printing, Excel and several screens at once
+
+Every report carries **Print / PDF** and **Download Excel**. The Excel file holds
+whatever is on screen — headings, tables and totals — under the company
+letterhead, with the period and currency.
+
+Printing goes through the host application, because a WebView has no print of its
+own; in the app the Android print dialogue opens, which includes *Save as PDF*.
+In a browser the normal print dialogue opens. **Inside an embedded preview frame
+printing is blocked by the browser** — the app or the saved system file both
+print normally, and the system says so rather than appearing to do nothing.
+
+Each screen has its own web address (`#/r_customer`, `#/daily`, …) and the
+sidebar entries are ordinary links, so in a browser you can long-press or
+middle-click one and **open it in a new tab**. Tabs on the same device share the
+same data.
+
 ### Currencies
 
 Accounts hold USD, SAR, YER or AED and **money is never added across

@@ -1,9 +1,12 @@
 package com.environmsafe.app
 
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.print.PrintAttributes
+import android.print.PrintManager
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -113,6 +116,24 @@ class MainActivity : AppCompatActivity() {
 
     /** Writes backups and CSV exports to a real file and offers to share them. */
     inner class FileBridge {
+
+        /**
+         * WebView has no window.print(), so the page asks the host to print.
+         * Android's print dialogue includes "Save as PDF".
+         */
+        @JavascriptInterface
+        fun printPage(jobName: String) {
+            runOnUiThread {
+                try {
+                    val name = if (jobName.isBlank()) getString(R.string.app_name) else jobName
+                    val manager = getSystemService(Context.PRINT_SERVICE) as PrintManager
+                    manager.print(name, web.createPrintDocumentAdapter(name),
+                        PrintAttributes.Builder().build())
+                } catch (e: Exception) {
+                    toast(getString(R.string.print_failed, e.message ?: ""))
+                }
+            }
+        }
 
         /** Binary files (Excel) arrive base64-encoded from the page. */
         @JavascriptInterface

@@ -5,4 +5,5 @@
     <string name="saved_to">Saved to %1$s</string>
     <string name="save_failed">Could not save the file: %1$s</string>
     <string name="no_file_app">No file manager found on this device.</string>
+    <string name="print_failed">Could not open the print dialogue: %1$s</string>
 </resources>
