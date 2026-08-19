@@ -1,0 +1,2763 @@
+<title>EnvironmSafe — Procurement &amp; Finance</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; }
+
+  :root {
+    --ground:#F4F6F8; --surface:#FFFFFF; --raised:#FAFBFC;
+    --ink:#131A2A; --ink-2:#3D4658; --muted:#5C6579; --line:#DFE3EA; --line-2:#EEF1F5;
+    --navy:#1A2744; --navy-ink:#F2F5FA; --gold:#E8A317; --gold-ink:#5A3E00;
+    --s-good:#1E7A4B; --s-warn:#9A6B00; --s-crit:#B02020; --s-info:#0E5E86;
+    --c-1:#0E7FA3; --c-2:#E8A317;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --shadow:0 1px 2px rgba(19,26,42,.06), 0 8px 24px rgba(19,26,42,.07);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#0D1220; --surface:#151D2E; --raised:#1A2436;
+      --ink:#E8EBF1; --ink-2:#C3CAD8; --muted:#96A1B7; --line:#263148; --line-2:#1E2739;
+      --navy:#101827; --navy-ink:#EDF1F8; --gold:#F2B23F; --gold-ink:#241800;
+      --s-good:#4BBE85; --s-warn:#E0B54A; --s-crit:#F08A8A; --s-info:#5EB6D8;
+      --c-1:#0E7FA3; --c-2:#C08A1C;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.32);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:#0D1220; --surface:#151D2E; --raised:#1A2436;
+    --ink:#E8EBF1; --ink-2:#C3CAD8; --muted:#96A1B7; --line:#263148; --line-2:#1E2739;
+    --navy:#101827; --navy-ink:#EDF1F8; --gold:#F2B23F; --gold-ink:#241800;
+    --s-good:#4BBE85; --s-warn:#E0B54A; --s-crit:#F08A8A; --s-info:#5EB6D8;
+    --c-1:#0E7FA3; --c-2:#C08A1C;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.32);
+  }
+  :root[data-theme="light"] {
+    --ground:#F4F6F8; --surface:#FFFFFF; --raised:#FAFBFC;
+    --ink:#131A2A; --ink-2:#3D4658; --muted:#5C6579; --line:#DFE3EA; --line-2:#EEF1F5;
+    --navy:#1A2744; --navy-ink:#F2F5FA; --gold:#E8A317; --gold-ink:#5A3E00;
+    --s-good:#1E7A4B; --s-warn:#9A6B00; --s-crit:#B02020; --s-info:#0E5E86;
+    --c-1:#0E7FA3; --c-2:#E8A317;
+    --shadow:0 1px 2px rgba(19,26,42,.06), 0 8px 24px rgba(19,26,42,.07);
+  }
+
+  body { background:var(--ground); color:var(--ink); font-family:var(--sans); font-size:15px; line-height:1.5; }
+  h1,h2,h3 { margin:0; font-weight:650; letter-spacing:-.01em; }
+  a { color:inherit; }
+
+  /* ---------- app frame ---------- */
+  .topbar {
+    background:var(--navy); color:var(--navy-ink);
+    display:flex; align-items:center; gap:.75rem; padding:.6rem .9rem;
+    border-bottom:3px solid var(--gold); position:sticky; top:0; z-index:30;
+  }
+  .brand { display:flex; align-items:center; gap:.6rem; min-width:0; flex:1 1 auto; }
+  .logo {
+    width:34px; height:34px; border-radius:3px; flex:none;
+    background:var(--gold); color:var(--navy);
+    display:grid; place-items:center; font-weight:800; font-size:.85rem; letter-spacing:-.03em;
+    background-size:cover; background-position:center;
+  }
+  /* the logo artwork is dark on white, so it sits on its own light chip */
+  .logo.art { width:54px; height:38px; background:#fff; background-size:contain;
+    background-repeat:no-repeat; background-position:center; border-radius:3px; }
+  .brand-txt { min-width:0; }
+  .brand-txt b { display:block; font-size:.95rem; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .brand-txt span { display:block; font-size:.68rem; color:var(--gold); font-family:var(--mono);
+    letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .topbar .spacer { flex:0 0 auto; }
+  .whoami { font-size:.75rem; color:var(--navy-ink); opacity:.85; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; max-width:11rem; }
+  .topbar select, .topbar button {
+    background:rgba(255,255,255,.1); color:var(--navy-ink); border:1px solid rgba(255,255,255,.22);
+    border-radius:3px; padding:.35rem .5rem; font:inherit; font-size:.8rem; cursor:pointer;
+    flex:0 0 auto; width:auto; max-width:9rem;
+  }
+  .topbar select option { color:#131A2A; background:#fff; }
+
+  .shell { display:grid; grid-template-columns:216px minmax(0,1fr); align-items:start; }
+  /* signed out: the hidden sidebar leaves its track behind, so drop to one column */
+  .shell.noauth { grid-template-columns:minmax(0,1fr); }
+  @media (max-width:56rem){ .shell{ grid-template-columns:minmax(0,1fr); } }
+
+  nav.side { position:sticky; top:57px; padding:.75rem .5rem; border-right:1px solid var(--line); background:var(--surface); min-height:calc(100vh - 57px); }
+  @media (max-width:56rem){
+    nav.side { position:static; min-height:0; border-right:0; border-bottom:1px solid var(--line);
+      display:flex; gap:.35rem; overflow-x:auto; padding:.5rem; }
+    nav.side .navgroup { display:flex; gap:.35rem; }
+    nav.side .navlabel { display:none; }
+  }
+  .navlabel { font-family:var(--mono); font-size:.65rem; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); padding:.75rem .6rem .3rem; }
+  .navbtn {
+    display:block; width:100%; text-align:start; background:none; border:0; color:var(--ink-2);
+    font:inherit; font-size:.875rem; padding:.45rem .6rem; border-radius:3px; cursor:pointer;
+    white-space:nowrap; text-decoration:none;
+  }
+  .navbtn:hover { background:var(--line-2); color:var(--ink); }
+  .navbtn[aria-current="true"] { background:var(--navy); color:var(--navy-ink); font-weight:600; }
+  .navbtn:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid var(--c-1); outline-offset:2px; }
+
+  main { padding:1.1rem 1.1rem 4rem; min-width:0; }
+  .page-head { display:flex; flex-wrap:wrap; align-items:baseline; gap:.5rem 1rem; margin-bottom:1rem; }
+  .page-head h1 { font-size:1.35rem; }
+  .page-head .sub { color:var(--muted); font-size:.85rem; }
+  .page-head .grow { flex:1; }
+
+  /* ---------- controls ---------- */
+  .btn {
+    background:var(--navy); color:var(--navy-ink); border:1px solid var(--navy);
+    border-radius:3px; padding:.5rem .85rem; font:inherit; font-size:.85rem; font-weight:600; cursor:pointer;
+  }
+  .btn:hover { filter:brightness(1.12); }
+  .btn.gold { background:var(--gold); border-color:var(--gold); color:var(--gold-ink); }
+  .btn.ghost { background:transparent; color:var(--ink); border-color:var(--line); font-weight:500; }
+  .btn.ghost:hover { background:var(--line-2); filter:none; }
+  .btn.sm { padding:.3rem .55rem; font-size:.78rem; }
+  .btn[disabled] { opacity:.45; cursor:not-allowed; filter:none; }
+
+  .field { display:flex; flex-direction:column; gap:.25rem; min-width:0; }
+  .field > label { font-size:.72rem; font-weight:600; color:var(--muted); letter-spacing:.04em; text-transform:uppercase; }
+  .field > label .ar { font-weight:400; text-transform:none; letter-spacing:0; opacity:.85; }
+  input, select, textarea {
+    font:inherit; font-size:.875rem; color:var(--ink); background:var(--surface);
+    border:1px solid var(--line); border-radius:3px; padding:.45rem .5rem; width:100%; min-width:0;
+  }
+  textarea { resize:vertical; min-height:2.4rem; }
+  .grid { display:grid; gap:.7rem; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+  .toolbar { display:flex; flex-wrap:wrap; gap:.5rem; align-items:end; margin-bottom:.9rem; }
+  .toolbar .field { flex:1 1 150px; }
+
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:4px; box-shadow:var(--shadow); padding:1rem; }
+  .card + .card { margin-top:1rem; }
+  .card > h2 { font-size:1rem; margin-bottom:.75rem; }
+  .card-note { font-size:.8rem; color:var(--muted); }
+
+  /* ---------- tables ---------- */
+  .tablewrap { overflow-x:auto; border:1px solid var(--line); border-radius:4px; background:var(--surface); }
+  table { border-collapse:collapse; width:100%; font-size:.83rem; }
+  th, td { padding:.45rem .6rem; text-align:start; border-bottom:1px solid var(--line-2); white-space:nowrap; }
+  th { background:var(--raised); font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:600; position:sticky; top:0; }
+  td.num, th.num { text-align:end; font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  tbody tr:hover { background:var(--line-2); }
+  tfoot td { font-weight:700; background:var(--raised); border-top:2px solid var(--line); }
+  .empty { padding:1.5rem; text-align:center; color:var(--muted); font-size:.85rem; }
+
+  .pill { display:inline-block; padding:.1rem .45rem; border-radius:10px; font-size:.68rem; font-weight:700;
+          letter-spacing:.03em; border:1px solid currentColor; }
+  .pill.draft{ color:var(--muted); } .pill.approved{ color:var(--s-info); }
+  .pill.paid{ color:var(--s-good); } .pill.closed{ color:var(--ink-2); } .pill.cancelled{ color:var(--s-crit); }
+
+  /* ---------- KPIs ---------- */
+  .kpis { display:grid; gap:.7rem; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); }
+  .kpi { background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:.7rem .8rem; }
+  .kpi .k { font-family:var(--mono); font-size:.65rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+  .kpi .v { font-size:1.35rem; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.02em; margin-top:.15rem; }
+  .kpi .n { font-size:.72rem; color:var(--muted); }
+  .kpi.good .v { color:var(--s-good); } .kpi.crit .v { color:var(--s-crit); }
+
+  /* ---------- chart ---------- */
+  .chart { width:100%; overflow-x:auto; }
+  .chart svg { display:block; min-width:520px; }
+  .legend { display:flex; gap:1rem; flex-wrap:wrap; font-size:.78rem; color:var(--ink-2); margin-bottom:.5rem; }
+  .legend i { width:10px; height:10px; border-radius:2px; display:inline-block; margin-inline-end:.35rem; }
+
+  /* ---------- modal ---------- */
+  .modal-bg { position:fixed; inset:0; background:rgba(10,14,24,.55); display:grid; place-items:center; padding:1rem; z-index:50; }
+  .modal { background:var(--surface); border:1px solid var(--line); border-radius:5px; box-shadow:var(--shadow);
+           width:min(700px,100%); max-height:88vh; overflow:auto; padding:1.1rem; }
+  .modal h2 { font-size:1.05rem; margin-bottom:.9rem; }
+  .modal .actions { display:flex; gap:.5rem; justify-content:flex-end; margin-top:1rem; }
+
+  .toast { position:fixed; inset-inline-end:1rem; bottom:1rem; background:var(--navy); color:var(--navy-ink);
+           padding:.6rem .9rem; border-radius:4px; font-size:.85rem; box-shadow:var(--shadow); z-index:60; }
+
+  .rowactions { display:flex; gap:.3rem; }
+  .linkbtn { background:none; border:0; color:var(--c-1); font:inherit; font-size:.8rem; cursor:pointer; padding:.15rem .3rem; text-decoration:underline; }
+
+  /* ---------- official letterhead ---------- */
+  .printhead { display:none; }
+  .letterhead { display:flex; align-items:center; gap:1rem; padding-bottom:.5rem; border-bottom:2px solid var(--navy); }
+  .lh-logo { width:104px; height:auto; flex:none; }
+  .lh-co { display:flex; flex-direction:column; gap:.1rem; min-width:0; }
+  .lh-co b { font-size:1rem; }
+  .lh-ar { font-size:.95rem; }
+  .lh-co small { font-size:.72rem; color:var(--muted); }
+  .lh-title { display:flex; flex-wrap:wrap; gap:.5rem 1rem; align-items:baseline;
+    border-bottom:2px solid var(--gold); padding:.35rem 0 .4rem; margin-bottom:.7rem; }
+  .lh-title b { font-size:1rem; letter-spacing:.02em; text-transform:uppercase; }
+  .lh-title span { font-size:.8rem; color:var(--muted); }
+
+  /* ---------- official document ---------- */
+  .doc { background:var(--surface); border:1px solid var(--line); border-radius:4px; padding:1.4rem; }
+  .doc-meta { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:.9rem; margin-bottom:1rem; }
+  .doc-meta h3 { margin:0 0 .2rem; font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--muted); font-family:var(--mono); font-weight:500; }
+  .doc-meta div p { margin:0; font-size:.85rem; }
+  .doc table { margin-top:.4rem; }
+  .doc td, .doc th { white-space:normal; }
+  .doc .totals { margin-top:.8rem; margin-inline-start:auto; width:min(320px,100%); }
+  .doc .totals td { border:0; padding:.2rem .4rem; }
+  .doc .totals tr:last-child td { border-top:2px solid var(--line); font-weight:700; font-size:.95rem; }
+  .doc-foot { margin-top:1.6rem; display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:1.5rem; }
+  .sign { border-top:1px solid var(--line); padding-top:.35rem; font-size:.78rem; color:var(--muted); }
+  .doc-note { margin-top:1rem; font-size:.75rem; color:var(--muted); }
+  .doc-pay { margin:.2rem 0 .9rem; font-size:.8rem; }
+  .doc-pay h3 { margin:0 0 .15rem; font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--muted); font-family:var(--mono); font-weight:500; }
+  .doc-pay p { margin:0; }
+  @media print {
+    .topbar, nav.side, .toolbar, .noprint { display:none !important; }
+    .shell { display:block; }
+    main { padding:0; }
+    body { background:#fff; color:#000; font-size:11px; }
+    .card, .tablewrap { border:0; box-shadow:none; }
+    .printhead { display:flex; align-items:center; gap:.75rem; border-bottom:2px solid #1A2744; padding-bottom:.4rem; margin-bottom:.6rem; }
+    .printhead .logo { background:#E8A317; color:#1A2744; }
+    th { background:#eee !important; color:#000; }
+    tbody tr:hover { background:none; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
+</style>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="logo" id="logoBox">ES</div>
+    <div class="brand-txt">
+      <b id="coName">EnvironmSafe</b>
+      <span id="coTag">Procurement &amp; Finance</span>
+    </div>
+  </div>
+  <div class="spacer"></div>
+  <select id="curSel" title="Currency"></select>
+  <span id="whoami" class="whoami"></span>
+  <button id="acctBtn" title="Account">Account</button>
+  <select id="langSel" title="Language">
+    <option value="en">EN</option>
+    <option value="ar">ع</option>
+  </select>
+</header>
+
+<div class="shell">
+  <nav class="side" id="nav"></nav>
+  <main id="main"></main>
+</div>
+
+<script>
+"use strict";
+
+/* =========================================================================
+   EnvironmSafe — Procurement & Financial Management
+   Single-file application. Storage: browser localStorage (works offline,
+   identical inside the Android APK and on the website).
+   ========================================================================= */
+
+/* Defaults only — the live values are editable under System → Company profile
+   and are stored with the data, so every device shows the same letterhead. */
+const COMPANY = {
+  name: "EnvironmSafe for Engineering, Trading, and Services Ltd.",
+  nameAr: "إنفايرومسيف للهندسة والتجارة والخدمات المحدودة",
+  address: "Aden",
+  country: "Republic of Yemen",
+  web: "www.environmsafe.com",
+  email: "support@environmsafe.com",
+  phone: "783402932",
+  phone2: "",
+  taxNo: "",
+  regNo: "",
+  activity: "Engineering · Trading · Works · Goods supply & Services",
+  addressLine: "Aden-Alburaqah / Sanaa-Alsafiah",
+  terms: "50% Payment within the order",
+  validity: "Quote validity — 1 week",
+  delivery: "Shipping and delivery: upon request",
+  vatRate: "",
+  // Bank details are deliberately NOT shipped in the code. Fill them in once under
+  // System -> Company profile; they are stored with your data on your own device.
+  payVia: "Payment to: EnvironmSafe for Engineering, Trading and Services Ltd.\n" +
+          "Bank name and account number: set under System > Company profile",
+  footer: "EnvironmSafe For Engineering, Trading, and Services Ltd.",
+  currency: "YER",
+  // Company logo, embedded so it works offline and inside the APK.
+  logo: "data:image/png;base64,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"
+};
+
+const DB_KEY = "environmsafe.db.v2";
+
+/* ---------- reference data ---------- */
+
+const PHASES = [
+  "RFQ IN","RFQ OUT","QUOTATION IN","QUOTATION OUT",
+  "PO IN","PO OUT","INVOICE IN","INVOICE OUT","PAYMENT","OTHER"
+];
+
+// side: which column the amount lands in (the company's stated Debit/Credit rule)
+// flow: how reports read the row.  party: which master the row belongs to.
+const TXTYPES = [
+  { v:"RFQ IN",         ar:"طلب عرض سعر وارد",  phase:"RFQ IN",         party:"customer", fin:false, side:"credit" },
+  { v:"RFQ OUT",        ar:"طلب عرض سعر صادر",  phase:"RFQ OUT",        party:"supplier", fin:false, side:"debit" },
+  { v:"QUOTATION IN",   ar:"عرض سعر وارد",      phase:"QUOTATION IN",   party:"supplier", fin:false, side:"debit" },
+  { v:"QUOTATION OUT",  ar:"عرض سعر صادر",      phase:"QUOTATION OUT",  party:"customer", fin:false, side:"credit" },
+  { v:"PO IN",          ar:"أمر شراء وارد",     phase:"PO IN",          party:"customer", fin:false, side:"credit" },
+  { v:"PO OUT",         ar:"أمر شراء صادر",     phase:"PO OUT",         party:"supplier", fin:false, side:"debit" },
+  { v:"INVOICE OUT",    ar:"فاتورة مبيعات",     phase:"INVOICE OUT",    party:"customer", fin:true, side:"credit", flow:"revenue" },
+  { v:"INVOICE IN",     ar:"فاتورة مشتريات",    phase:"INVOICE IN",     party:"supplier", fin:true, side:"debit",  flow:"cost" },
+  { v:"SALES RETURN",   ar:"مرتجع مبيعات",      phase:"INVOICE OUT",    party:"customer", fin:true, side:"debit",  flow:"revenue_return", against:1 },
+  { v:"PURCHASE RETURN",ar:"مرتجع مشتريات",     phase:"INVOICE IN",     party:"supplier", fin:true, side:"credit", flow:"cost_return",    against:1 },
+  { v:"REFUND TO CUSTOMER",  ar:"استرداد للعميل",  phase:"PAYMENT",     party:"customer", fin:true, side:"debit",  flow:"cash_out", cash:true, against:1 },
+  { v:"REFUND FROM SUPPLIER",ar:"استرداد من المورد",phase:"PAYMENT",    party:"supplier", fin:true, side:"credit", flow:"cash_in",  cash:true, against:1 },
+  { v:"RECEIPT",        ar:"سند قبض",           phase:"PAYMENT",        party:"customer", fin:true, side:"credit", flow:"cash_in",  cash:true },
+  { v:"PAYMENT OUT",    ar:"سند صرف",           phase:"PAYMENT",        party:"supplier", fin:true, side:"debit",  flow:"cash_out", cash:true },
+  { v:"EXPENSE",        ar:"مصروف",             phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cost_cash_out", cash:true },
+  { v:"SALARY",         ar:"راتب",              phase:"OTHER",          party:"employee", fin:true, side:"debit",  flow:"cost_cash_out", cash:true },
+  { v:"ADVANCE TO EMPLOYEE", ar:"سلفة موظف",    phase:"OTHER",          party:"employee", fin:true, side:"debit",  flow:"cash_out", cash:true },
+  { v:"LOAN IN",        ar:"قرض/دين وارد",      phase:"OTHER",          party:"none",     fin:true, side:"credit", flow:"cash_in",  cash:true },
+  { v:"LOAN OUT",       ar:"قرض/دين صادر",      phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cash_out", cash:true },
+  { v:"TRANSFER IN",    ar:"تحويل وارد",        phase:"OTHER",          party:"none",     fin:true, side:"credit", flow:"cash_in",  cash:true },
+  { v:"TRANSFER OUT",   ar:"تحويل صادر",        phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cash_out", cash:true },
+  { v:"OWNER DRAWINGS", ar:"مسحوبات الشركاء",   phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cash_out", cash:true },
+  { v:"DEPOSIT PAID",   ar:"ضمان/تأمين مدفوع",  phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cash_out", cash:true, deposit:1 },
+  { v:"DEPOSIT RETURNED", ar:"استرداد ضمان",    phase:"OTHER",          party:"none",     fin:true, side:"credit", flow:"cash_in",  cash:true, deposit:-1 },
+  { v:"OTHER",          ar:"أخرى",              phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"other" }
+];
+const typeOf = v => TXTYPES.find(t => t.v === v) || TXTYPES[TXTYPES.length-1];
+
+const STATUSES = ["Draft","Approved","Paid","Closed","Cancelled"];
+const ASSET_CATEGORIES = ["Vehicles","Machinery & equipment","Safety equipment","Office equipment",
+  "IT & computers","Furniture & fittings","Tools","Buildings & premises","Other"];
+const ASSET_STATUS = ["In use","In store","Under maintenance","Disposed","Sold"];
+const ASSET_LIVE = ["In use","In store","Under maintenance"];
+const ROLES = ["Administrator","Data Entry","Reviewer","Manager"];
+const DEFAULT_ADMIN = { username:"admin", password:"EnvironmSafe@2026" };
+const DOCTYPES = ["RFQ","Quotation","Purchase Order","Invoice","Receipt","Delivery Note","Contract","Bank Slip","Other"];
+
+/* ---------- master-table schemas (drive the generic CRUD screens) ---------- */
+
+const SCHEMAS = {
+  customers: { prefix:"CUS", en:"Customers", ar:"العملاء", fields:[
+    {k:"nameEn", l:"Name (English)", req:true}, {k:"nameAr", l:"Name (Arabic)"},
+    {k:"contact", l:"Contact person"}, {k:"phone", l:"Phone"}, {k:"email", l:"Email"},
+    {k:"address", l:"Address"}, {k:"opening", l:"Opening balance (owed to us)", t:"number"},
+    {k:"notes", l:"Notes", t:"textarea"} ], cols:["nameEn","phone","email","address"] },
+
+  suppliers: { prefix:"SUP", en:"Suppliers", ar:"الموردون", fields:[
+    {k:"nameEn", l:"Name (English)", req:true}, {k:"nameAr", l:"Name (Arabic)"},
+    {k:"contact", l:"Contact person"}, {k:"phone", l:"Phone"}, {k:"email", l:"Email"},
+    {k:"address", l:"Address"}, {k:"opening", l:"Opening balance (we owe)", t:"number"},
+    {k:"notes", l:"Notes", t:"textarea"} ], cols:["nameEn","phone","email","address"] },
+
+  employees: { prefix:"EMP", en:"Employees", ar:"الموظفون", fields:[
+    {k:"nameEn", l:"Name (English)", req:true}, {k:"nameAr", l:"Name (Arabic)"},
+    {k:"position", l:"Position"}, {k:"phone", l:"Phone"},
+    {k:"salary", l:"Monthly salary", t:"number"}, {k:"notes", l:"Notes", t:"textarea"} ],
+    cols:["nameEn","position","phone","salary"] },
+
+  projects: { prefix:"PRJ", en:"Projects", ar:"المشاريع", fields:[
+    {k:"nameEn", l:"Project name (English)", req:true}, {k:"nameAr", l:"Project name (Arabic)"},
+    {k:"customerId", l:"Customer", t:"ref", ref:"customers"},
+    {k:"kind", l:"Type", t:"select", opts:["Goods supply","Services","Works","Mixed"]},
+    {k:"status", l:"Status", t:"select", opts:["Open","On hold","Completed","Cancelled"]},
+    {k:"budget", l:"Contract value", t:"number"}, {k:"notes", l:"Notes", t:"textarea"} ],
+    cols:["nameEn","customerId","kind","status","budget"] },
+
+  accounts: { prefix:"ACC", en:"Bank & Cash accounts", ar:"الحسابات البنكية والنقدية", fields:[
+    {k:"nameEn", l:"Account name", req:true}, {k:"nameAr", l:"Account name (Arabic)"},
+    {k:"kind", l:"Type", t:"select", opts:["Bank","Cash","Visa card","Wallet"]},
+    {k:"bank", l:"Bank", t:"select", opts:["Tadhamon","Al Quataibi","Al Kuraimi","Other","—"]},
+    {k:"number", l:"Account / card number"},
+    {k:"currency", l:"Currency", t:"select", opts:["YER","USD","SAR","AED"]},
+    {k:"opening", l:"Opening balance", t:"number"}, {k:"notes", l:"Notes", t:"textarea"} ],
+    cols:["nameEn","kind","bank","currency","opening"] },
+
+  items: { prefix:"ITM", en:"Products & Services", ar:"المنتجات والخدمات", fields:[
+    {k:"code", l:"Code"}, {k:"nameEn", l:"Description (English)", req:true},
+    {k:"nameAr", l:"Description (Arabic)"},
+    {k:"kind", l:"Type", t:"select", opts:["Goods","Service","Work"]},
+    {k:"unit", l:"Unit", t:"select", opts:["pcs","set","kg","ton","litre","metre","m2","m3","hour","day","month","lump sum","trip","visit"]},
+    {k:"category", l:"Group"},
+    {k:"salePrice", l:"Selling price", t:"number"}, {k:"costPrice", l:"Purchase price", t:"number"},
+    {k:"isAsset", l:"Buying this creates a fixed asset", t:"select", opts:["No","Yes"]},
+    {k:"lifeYears", l:"Useful life (years, for assets)", t:"number"},
+    {k:"notes", l:"Specification / notes", t:"textarea"} ],
+    cols:["code","nameEn","kind","unit","salePrice","costPrice","isAsset"] },
+
+  assets: { prefix:"AST", en:"Fixed assets", ar:"الأصول الثابتة", fields:[
+    {k:"tag", l:"Asset tag / code"}, {k:"nameEn", l:"Asset name (English)", req:true},
+    {k:"nameAr", l:"Asset name (Arabic)"},
+    {k:"category", l:"Category", t:"select", opts:ASSET_CATEGORIES},
+    {k:"itemId", l:"Catalogue item", t:"ref", ref:"items"},
+    {k:"serial", l:"Serial / chassis / plate no"},
+    {k:"location", l:"Location"},
+    {k:"custodianId", l:"Custodian (employee)", t:"ref", ref:"employees"},
+    {k:"supplierId", l:"Supplier", t:"ref", ref:"suppliers"},
+    {k:"acquiredOn", l:"Acquisition date", t:"date"},
+    {k:"qty", l:"Quantity", t:"number"},
+    {k:"cost", l:"Acquisition cost", t:"number", req:true},
+    {k:"lifeYears", l:"Useful life (years)", t:"number"},
+    {k:"salvage", l:"Residual value at end of life", t:"number"},
+    {k:"method", l:"Depreciation", t:"select", opts:["Straight line","None"]},
+    {k:"status", l:"Status", t:"select", opts:ASSET_STATUS},
+    {k:"source", l:"Source", t:"select", opts:["Purchased","Opening balance"]},
+    {k:"disposedOn", l:"Disposal / sale date", t:"date"},
+    {k:"disposalValue", l:"Disposal / sale value", t:"number"},
+    {k:"notes", l:"Notes", t:"textarea"} ],
+    cols:["tag","nameEn","category","location","acquiredOn","cost","status"] },
+
+  users: { prefix:"USR", en:"Users", ar:"المستخدمون", fields:[
+    {k:"nameEn", l:"Full name", req:true}, {k:"nameAr", l:"Full name (Arabic)"},
+    {k:"username", l:"Username (for sign-in)", req:true},
+    {k:"role", l:"Role", t:"select", opts:ROLES},
+    {k:"active", l:"Account active", t:"select", opts:["Yes","No"]},
+    {k:"phone", l:"Phone"}, {k:"notes", l:"Notes", t:"textarea"} ],
+    cols:["nameEn","username","role","active"] },
+
+  categories: { prefix:"CAT", en:"Expense categories", ar:"بنود المصروفات", fields:[
+    {k:"nameEn", l:"Category (English)", req:true}, {k:"nameAr", l:"Category (Arabic)"},
+    {k:"kind", l:"Group", t:"select", opts:["Operations","Marketing","Salaries","Logistics","Government","Finance","Other"]},
+    {k:"notes", l:"Notes", t:"textarea"} ], cols:["nameEn","kind"] }
+};
+
+/* ---------- bilingual UI strings ---------- */
+
+const T = {
+  dashboard:["Dashboard","لوحة المعلومات"], daily:["Daily entry","الإدخال اليومي"],
+  ledger:["Transactions","الحركات"], cases:["Procurement files","ملفات المشتريات"],
+  masters:["Master data","البيانات الأساسية"], reports:["Reports","التقارير"],
+  data:["Backup & sync","النسخ والمزامنة"], users:["Users","المستخدمون"],
+  items:["Products & services","المنتجات والخدمات"], assets:["Fixed assets","الأصول الثابتة"], deposits:["Deposits held","ضمانات لدى الغير"],
+  r_asset:["Asset register & depreciation","سجل الأصول والإهلاك"], company:["Company profile","بيانات الشركة"],
+  r_item:["Product & service report","تقرير المنتجات والخدمات"],
+  r_document:["Official documents","المستندات الرسمية"],
+  customers:["Customers","العملاء"], suppliers:["Suppliers","الموردون"],
+  employees:["Employees","الموظفون"], projects:["Projects","المشاريع"],
+  accounts:["Bank & cash","البنوك والنقد"], categories:["Expense categories","بنود المصروفات"],
+  r_customer:["Customer statement","كشف حساب عميل"], r_supplier:["Supplier statement","كشف حساب مورد"],
+  r_project:["Project profitability","ربحية المشروع"], r_employee:["Employee report","تقرير الموظفين"],
+  r_bank:["Bank & cash ledger","حركة البنوك والنقد"], r_summary:["Financial summary","الملخص المالي"],
+  revenue:["Revenue","الإيرادات"], costs:["Costs","التكاليف"], profit:["Net profit","صافي الربح"],
+  cash:["Cash on hand","النقد المتوفر"], ar:["Receivable","ذمم مدينة"], ap:["Payable","ذمم دائنة"], assets:["Fixed assets","الأصول الثابتة"],
+  save:["Save","حفظ"], cancel:["Cancel","إلغاء"], add:["Add","إضافة"], edit:["Edit","تعديل"],
+  del:["Delete","حذف"], print:["Print / PDF","طباعة"], search:["Search","بحث"],
+  from:["From","من"], to:["To","إلى"], total:["Total","الإجمالي"], balance:["Balance","الرصيد"],
+  debit:["Debit","مدين"], credit:["Credit","دائن"], opening:["Opening","رصيد افتتاحي"],
+  closing:["Closing","الرصيد الختامي"], date:["Date","التاريخ"], type:["Type","النوع"],
+  phase:["Phase","المرحلة"], status:["Status","الحالة"], amount:["Amount","المبلغ"],
+  ref:["Reference No","رقم المرجع"], notes:["Notes","ملاحظات"], none:["No records yet","لا توجد بيانات"]
+};
+let LANG = localStorage.getItem("environmsafe.lang") || "en";
+const t = k => (T[k] ? T[k][LANG === "ar" ? 1 : 0] : k);
+
+/* ---------- storage ---------- */
+
+const blankDb = () => ({
+  meta:{ seq:{}, created:new Date().toISOString(), device:"device-" + Math.random().toString(36).slice(2,8) },
+  users:[], items:[], assets:[], customers:[], suppliers:[], employees:[], projects:[], accounts:[], categories:[], transactions:[]
+});
+
+let DB = load();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(DB_KEY);
+    if (raw) { const d = JSON.parse(raw); return Object.assign(blankDb(), d); }
+  } catch (e) { console.warn("Could not read saved data:", e); }
+  const d = blankDb();
+  seed(d);
+  return d;
+}
+function save() {
+  try { localStorage.setItem(DB_KEY, JSON.stringify(DB)); }
+  catch (e) { toast("Storage is full — export a backup and remove old attachments."); }
+}
+function seed(d) {
+  const now = new Date().toISOString();
+  const mk = (tbl, prefix, rows) => rows.forEach((r,i) => {
+    d[tbl].push(Object.assign({ id:`${prefix}-${String(i+1).padStart(4,"0")}`, createdAt:now, updatedAt:now }, r));
+    d.meta.seq[prefix] = i+1;
+  });
+  mk("accounts","ACC",[
+    { nameEn:"Tadhamon Bank — main", nameAr:"بنك التضامن", kind:"Bank", bank:"Tadhamon", currency:"YER", opening:0 },
+    { nameEn:"Al Quataibi Bank", nameAr:"بنك القطيبي", kind:"Bank", bank:"Al Quataibi", currency:"YER", opening:0 },
+    { nameEn:"Al Kuraimi Bank", nameAr:"بنك الكريمي", kind:"Bank", bank:"Al Kuraimi", currency:"YER", opening:0 },
+    { nameEn:"Office cash", nameAr:"الصندوق", kind:"Cash", bank:"—", currency:"YER", opening:0 },
+    { nameEn:"Visa card", nameAr:"بطاقة فيزا", kind:"Visa card", bank:"Other", currency:"USD", opening:0 }
+  ]);
+  mk("categories","CAT",[
+    { nameEn:"Marketing", nameAr:"تسويق", kind:"Marketing" },
+    { nameEn:"Operating expenses", nameAr:"مصاريف تشغيلية", kind:"Operations" },
+    { nameEn:"Salaries", nameAr:"رواتب", kind:"Salaries" },
+    { nameEn:"Staff motivation", nameAr:"حوافز", kind:"Salaries" },
+    { nameEn:"Shipping & clearance", nameAr:"شحن وتخليص", kind:"Logistics" },
+    { nameEn:"Government fees", nameAr:"رسوم حكومية", kind:"Government" },
+    { nameEn:"Bank charges", nameAr:"عمولات بنكية", kind:"Finance" }
+  ]);
+}
+function nextId(prefix) {
+  DB.meta.seq[prefix] = (DB.meta.seq[prefix] || 0) + 1;
+  return `${prefix}-${String(DB.meta.seq[prefix]).padStart(4,"0")}`;
+}
+
+/* ---------- helpers ---------- */
+
+const $ = s => document.querySelector(s);
+const el = (tag, attrs = {}, html = "") => { const n = document.createElement(tag); Object.entries(attrs).forEach(([k,v]) => n.setAttribute(k,v)); if (html) n.innerHTML = html; return n; };
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const num = v => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
+const fmt = v => num(v).toLocaleString("en-US", { minimumFractionDigits:2, maximumFractionDigits:2 });
+const fmt0 = v => Math.round(num(v)).toLocaleString("en-US");
+const today = () => new Date().toISOString().slice(0,10);
+const monthOf = d => (d || "").slice(0,7);
+const rowsOf = tbl => DB[tbl] || [];
+const byId = (tbl, id) => rowsOf(tbl).find(r => r.id === id);
+const nameOf = (tbl, id) => { const r = byId(tbl, id); return r ? (LANG === "ar" && r.nameAr ? r.nameAr : r.nameEn) : ""; };
+
+/* ---------- sign-in ---------- */
+
+let USER = null;                       // the signed-in user record
+const ROLE = () => (USER ? USER.role : "Manager");
+const isAdmin   = () => ROLE() === "Administrator";
+const canEdit   = () => ["Administrator","Data Entry","Reviewer"].includes(ROLE());
+const canApprove = () => ["Administrator","Reviewer"].includes(ROLE());
+
+const randomSalt = () => {
+  const a = new Uint8Array(16);
+  (self.crypto || {}).getRandomValues ? crypto.getRandomValues(a) : a.forEach((_,i) => a[i] = Math.random()*256);
+  return [...a].map(b => b.toString(16).padStart(2,"0")).join("");
+};
+
+/** SHA-256 of salt+password where available; a weaker fallback otherwise. */
+async function hashPw(password, salt) {
+  const bytes = new TextEncoder().encode(salt + "::" + password);
+  if (self.crypto && crypto.subtle && crypto.subtle.digest) {
+    const buf = await crypto.subtle.digest("SHA-256", bytes);
+    return "s1:" + [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,"0")).join("");
+  }
+  let h = 2166136261 >>> 0, out = "";
+  for (let round = 0; round < 4; round++) {
+    for (const b of bytes) { h ^= b; h = Math.imul(h, 16777619) >>> 0; }
+    out += h.toString(16).padStart(8,"0");
+  }
+  return "f1:" + out;
+}
+async function setPassword(user, password) {
+  user.salt = randomSalt();
+  user.pw = await hashPw(password, user.salt);
+  user.updatedAt = new Date().toISOString();
+}
+async function checkPassword(user, password) {
+  if (!user || !user.pw) return false;
+  return (await hashPw(password, user.salt)) === user.pw;
+}
+const userByName = name =>
+  rowsOf("users").find(u => (u.username || "").toLowerCase() === String(name || "").trim().toLowerCase());
+
+async function ensureAdmin() {
+  if (rowsOf("users").length) return;
+  const now = new Date().toISOString();
+  const admin = {
+    id:nextId("USR"), nameEn:"Administrator", username:DEFAULT_ADMIN.username,
+    role:"Administrator", active:"Yes", mustChange:"Yes", createdAt:now, updatedAt:now
+  };
+  await setPassword(admin, DEFAULT_ADMIN.password);
+  DB.users.push(admin);
+  save();
+}
+
+function toast(msg) {
+  const n = el("div", { class:"toast" }, esc(msg));
+  document.body.appendChild(n);
+  setTimeout(() => n.remove(), 3200);
+}
+
+/* Android bridge (present inside the APK), else browser download */
+function saveFile(filename, content, mime = "application/json") {
+  if (window.AndroidBridge && window.AndroidBridge.saveFile) {
+    try { AndroidBridge.saveFile(filename, content); toast("Saved to Downloads: " + filename); return; }
+    catch (e) { /* fall through */ }
+  }
+  const blob = new Blob([content], { type:mime });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href:url, download:filename });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/* ---------- transaction maths ---------- */
+
+const flowOf = tx => typeOf(tx.type).flow || "";
+const isRevenue = tx => flowOf(tx) === "revenue";
+/* Buying a fixed asset is capital expenditure, not a cost of the period: it does
+   not reduce profit — depreciation does, spread over the asset's life. The money
+   and the supplier balance still move exactly as before. */
+const isCapital = tx => tx.isAsset === "Yes" &&
+  (flowOf(tx) === "cost" || flowOf(tx) === "cost_cash_out");
+const isCost    = tx => !isCapital(tx) &&
+  (flowOf(tx) === "cost" || flowOf(tx) === "cost_cash_out");
+/* What the supplier billed us — an asset purchase is still a debt to pay, even
+   though it never touches the profit for the period. */
+const isBilled  = tx => flowOf(tx) === "cost" || flowOf(tx) === "cost_cash_out";
+
+/* Returns. A customer sending goods back reduces what we sold and what they owe;
+   returning goods to a supplier reduces what we bought and what we owe them.
+   A refund is the money afterwards, and settles the balance the return created. */
+const isSalesReturn    = tx => flowOf(tx) === "revenue_return";
+const isPurchaseReturn = tx => flowOf(tx) === "cost_return";
+const isRefundOut      = tx => tx.type === "REFUND TO CUSTOMER";
+const isRefundIn       = tx => tx.type === "REFUND FROM SUPPLIER";
+
+/** Sales less what came back. */
+const netRevenue = list => sum(list.filter(isRevenue), amountOf) - sum(list.filter(isSalesReturn), amountOf);
+/** Purchases less what we sent back. */
+const netCost    = list => sum(list.filter(isCost), amountOf) - sum(list.filter(isPurchaseReturn), amountOf);
+const isCashIn  = tx => flowOf(tx) === "cash_in";
+const isCashOut = tx => flowOf(tx) === "cash_out" || flowOf(tx) === "cost_cash_out";
+const amountOf  = tx => num(tx.debit) + num(tx.credit);
+const live      = tx => tx.status !== "Cancelled";
+
+/* ---------- currency ----------
+   Money is never added across currencies. Every row carries the currency of the
+   account it moved through; rows with no account fall back to the company's
+   default. A currency must be chosen to see a single set of figures, and
+   "All currencies" renders one block per currency instead of one wrong total. */
+
+const CURRENCIES = ["YER","USD","SAR","AED"];
+let CUR = localStorage.getItem("environmsafe.currency") || "";
+
+function txCurrency(tx) {
+  if (tx.currency) return tx.currency;
+  const a = byId("accounts", tx.accountId);
+  return (a && a.currency) || CO().currency || "YER";
+}
+/** Currencies money has actually moved in, most used first. An account that has
+    never been used does not count — otherwise the dashboard splits into blocks
+    for currencies with nothing in them. */
+function currenciesInUse() {
+  const c = {};
+  DB.transactions.filter(live).forEach(tx => { const k = txCurrency(tx); c[k] = (c[k] || 0) + 1; });
+  return Object.keys(c).sort((a,b) => c[b] - c[a]);
+}
+/** Everything worth offering in the picker, including unused accounts. */
+function currencyChoices() {
+  const seen = new Set(currenciesInUse());
+  rowsOf("accounts").forEach(a => { if (a.currency) seen.add(a.currency); });
+  CURRENCIES.forEach(c => seen.add(c));
+  return [...seen];
+}
+const curSuffix = () => (CUR ? " " + CUR : "");
+
+function inRange(tx, from, to) {
+  if (from && tx.date < from) return false;
+  if (to && tx.date > to) return false;
+  return true;
+}
+function txs(filter = {}) {
+  const cur = filter.currency !== undefined ? filter.currency : CUR;
+  return DB.transactions
+    .filter(live)
+    .filter(tx => !cur || txCurrency(tx) === cur)
+    .filter(tx => inRange(tx, filter.from, filter.to))
+    .filter(tx => !filter.customerId || tx.customerId === filter.customerId)
+    .filter(tx => !filter.supplierId || tx.supplierId === filter.supplierId)
+    .filter(tx => !filter.employeeId || tx.employeeId === filter.employeeId)
+    .filter(tx => !filter.projectId  || tx.projectId  === filter.projectId)
+    .filter(tx => !filter.accountId  || tx.accountId  === filter.accountId)
+    .filter(tx => !filter.type       || tx.type       === filter.type)
+    .filter(tx => !filter.status     || tx.status     === filter.status)
+    .sort((a,b) => (a.date + a.id).localeCompare(b.date + b.id));
+}
+const sum = (list, fn) => list.reduce((s,x) => s + num(fn(x)), 0);
+
+function accountBalance(accId, upto) {
+  const acc = byId("accounts", accId); if (!acc) return 0;
+  // an account holds one currency, so its own rows are always comparable
+  const list = txs({ accountId:accId, to:upto, currency:"" });
+  return num(acc.opening) + sum(list.filter(isCashIn), amountOf) - sum(list.filter(isCashOut), amountOf);
+}
+function customerBalance(cusId, upto, cur) {
+  const c = byId("customers", cusId); if (!c) return 0;
+  const list = txs({ customerId:cusId, to:upto, currency:cur === undefined ? CUR : cur });
+  const opening = (cur === undefined ? CUR : cur) && (cur || CUR) !== (CO().currency || "YER") ? 0 : num(c.opening);
+  //  invoiced − returned − received + refunded back to them
+  return opening + sum(list.filter(isRevenue), amountOf)
+                 - sum(list.filter(isSalesReturn), amountOf)
+                 - sum(list.filter(isCashIn), amountOf)
+                 + sum(list.filter(isRefundOut), amountOf);
+}
+function supplierBalance(supId, upto, cur) {
+  const s = byId("suppliers", supId); if (!s) return 0;
+  const list = txs({ supplierId:supId, to:upto, currency:cur === undefined ? CUR : cur });
+  const opening = (cur === undefined ? CUR : cur) && (cur || CUR) !== (CO().currency || "YER") ? 0 : num(s.opening);
+  //  billed − returned − paid + refunded back to us
+  return opening + sum(list.filter(isBilled), amountOf)
+                 - sum(list.filter(isPurchaseReturn), amountOf)
+                 - sum(list.filter(isCashOut), amountOf)
+                 + sum(list.filter(isRefundIn), amountOf);
+}
+/** Refundable guarantees and deposits we are holding out with someone else. */
+const depositsHeld = (upto, cur) => {
+  const list = txs({ to:upto, currency:cur === undefined ? CUR : cur });
+  return sum(list.filter(x => typeOf(x.type).deposit === 1), amountOf) -
+         sum(list.filter(x => typeOf(x.type).deposit === -1), amountOf);
+};
+/* ---------- fixed assets & depreciation (straight line) ---------- */
+
+const monthsBetween = (from, to) => {
+  if (!from || !to) return 0;
+  const a = new Date(from), b = new Date(to);
+  if (isNaN(a) || isNaN(b) || b < a) return 0;
+  return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()) +
+         (b.getDate() >= a.getDate() ? 0 : -1);
+};
+const assetLive = a => ASSET_LIVE.includes(a.status || "In use");
+
+/** Monthly charge, or 0 when the asset is not depreciated. */
+function monthlyDepn(a) {
+  if ((a.method || "Straight line") === "None") return 0;
+  const life = num(a.lifeYears);
+  if (life <= 0) return 0;
+  const base = num(a.cost) - num(a.salvage);
+  return base > 0 ? base / (life * 12) : 0;
+}
+/** Depreciation accumulated from acquisition up to `upto` (default: today). */
+function accumDepn(a, upto) {
+  const m = monthlyDepn(a);
+  if (!m) return 0;
+  const end = a.disposedOn && (!upto || a.disposedOn < upto) ? a.disposedOn : (upto || today());
+  const months = monthsBetween(a.acquiredOn, end);
+  return Math.min(num(a.cost) - num(a.salvage), Math.max(0, months) * m);
+}
+const netBookValue = (a, upto) =>
+  (a.status === "Disposed" || a.status === "Sold") && (!upto || (a.disposedOn && a.disposedOn <= upto))
+    ? 0 : num(a.cost) - accumDepn(a, upto);
+/** Charge falling inside a reporting period. */
+const depnInPeriod = (a, from, to) =>
+  Math.max(0, accumDepn(a, to || today()) - (from ? accumDepn(a, from) : 0));
+
+const totalAssetCost = upto => rowsOf("assets")
+  .filter(a => !upto || !a.acquiredOn || a.acquiredOn <= upto)
+  .filter(a => assetLive(a)).reduce((s,a) => s + num(a.cost), 0);
+const totalNBV = upto => rowsOf("assets")
+  .filter(a => !upto || !a.acquiredOn || a.acquiredOn <= upto)
+  .filter(a => assetLive(a)).reduce((s,a) => s + netBookValue(a, upto), 0);
+const periodDepn = (from, to) => rowsOf("assets").reduce((s,a) => s + depnInPeriod(a, from, to), 0);
+
+const curAccounts = () => rowsOf("accounts").filter(a => !CUR || (a.currency || CO().currency) === CUR);
+const totalCash = () => curAccounts().reduce((s,a) => s + accountBalance(a.id), 0);
+const totalAR = () => rowsOf("customers").reduce((s,c) => s + customerBalance(c.id), 0);
+const totalAP = () => rowsOf("suppliers").reduce((s,x) => s + supplierBalance(x.id), 0);
+
+/* =========================================================================
+   Navigation
+   ========================================================================= */
+
+const NAV = [
+  { group:"Operations", items:[
+    { id:"dashboard", label:"dashboard" }, { id:"daily", label:"daily" },
+    { id:"ledger", label:"ledger" }, { id:"cases", label:"cases" } ] },
+  { group:"Master data", items:[
+    { id:"m_items", label:"items" }, { id:"m_assets", label:"assets" },
+    { id:"m_customers", label:"customers" }, { id:"m_suppliers", label:"suppliers" },
+    { id:"m_employees", label:"employees" }, { id:"m_projects", label:"projects" },
+    { id:"m_accounts", label:"accounts" }, { id:"m_categories", label:"categories" } ] },
+  { group:"Reports", items:[
+    { id:"r_summary", label:"r_summary" }, { id:"r_customer", label:"r_customer" },
+    { id:"r_supplier", label:"r_supplier" }, { id:"r_project", label:"r_project" },
+    { id:"r_employee", label:"r_employee" }, { id:"r_bank", label:"r_bank" },
+    { id:"r_item", label:"r_item" }, { id:"r_asset", label:"r_asset" },
+    { id:"r_document", label:"r_document" } ] },
+  { group:"System", items:[ { id:"m_users", label:"users", admin:true },
+    { id:"company", label:"company", admin:true }, { id:"data", label:"data" } ] }
+];
+
+let VIEW = "dashboard";
+
+function renderNav() {
+  const nav = $("#nav"); nav.innerHTML = "";
+  NAV.forEach(g => {
+    nav.appendChild(el("div", { class:"navlabel" }, esc(g.group)));
+    const box = el("div", { class:"navgroup" });
+    g.items.filter(it => !it.admin || isAdmin()).forEach(it => {
+      const b = el("a", { class:"navbtn", href:"#/" + it.id, "data-view":it.id,
+                          "aria-current":String(VIEW === it.id) }, esc(t(it.label)));
+      box.appendChild(b);
+    });
+    nav.appendChild(box);
+  });
+}
+function go(view) {
+  // changing the address drives the render, which is what gives each screen a
+  // web address the browser can open in a second tab
+  if (location.hash !== "#/" + view) location.hash = "#/" + view;
+  else { VIEW = view; render(); window.scrollTo(0, 0); }
+}
+function viewFromHash() {
+  const id = (location.hash || "").replace(/^#\/?/, "").trim();
+  return id && NAV.some(g => g.items.some(it => it.id === id)) ? id : "";
+}
+window.addEventListener("hashchange", () => {
+  const v = viewFromHash();
+  if (v && v !== VIEW) { VIEW = v; if (USER) render(); window.scrollTo(0, 0); }
+});
+
+function render() {
+  renderNav();
+  if (USER) {
+    // never leave the user staring at an empty screen because the chosen
+    // currency holds nothing while their data sits in another one
+    const inUse = currenciesInUse();
+    if (CUR && inUse.length && !inUse.includes(CUR)) {
+      CUR = inUse[0];
+      localStorage.setItem("environmsafe.currency", CUR);
+    }
+    fillCurrencySelect();
+  }
+  const m = $("#main"); m.innerHTML = "";
+  if (VIEW === "dashboard") viewDashboard(m);
+  else if (VIEW === "daily") viewDaily(m);
+  else if (VIEW === "ledger") viewLedger(m);
+  else if (VIEW === "cases") viewCases(m);
+  else if (VIEW.startsWith("m_")) viewMaster(m, VIEW.slice(2));
+  else if (VIEW.startsWith("r_")) viewReport(m, VIEW.slice(2));
+  else if (VIEW === "company") viewCompany(m);
+  else if (VIEW === "data") viewData(m);
+}
+
+function pageHead(parent, title, sub, actions = []) {
+  const h = el("div", { class:"page-head" });
+  const box = el("div"); box.appendChild(el("h1", {}, esc(title)));
+  if (sub) box.appendChild(el("div", { class:"sub" }, esc(sub)));
+  h.appendChild(box); h.appendChild(el("div", { class:"grow" }));
+  actions.forEach(a => {
+    const b = el("button", { class:"btn " + (a.cls || "ghost") + " noprint" }, esc(a.label));
+    if (a.disabled) b.setAttribute("disabled","");
+    b.onclick = a.on; h.appendChild(b);
+  });
+  parent.appendChild(h);
+  return h;
+}
+/** Live company details: the saved profile over the built-in defaults. */
+const CO = () => Object.assign({}, COMPANY, DB.meta.company || {});
+
+/** The official letterhead used on every printed report and document. */
+function letterhead(title, sub) {
+  const c = CO();
+  const line2 = [c.address, c.country].filter(Boolean).join(", ");
+  const contact = [c.phone, c.phone2].filter(Boolean).join(" · ");
+  const ids = [c.taxNo && `Tax No: ${c.taxNo}`, c.regNo && `Reg. No: ${c.regNo}`].filter(Boolean).join(" · ");
+  return `<div class="letterhead">
+    ${c.logo ? `<img class="lh-logo" src="${c.logo}" alt="">` : ""}
+    <div class="lh-co">
+      <b>${esc(c.name)}</b>
+      ${c.nameAr ? `<span class="lh-ar">${esc(c.nameAr)}</span>` : ""}
+      <small>${esc(c.activity || "")}</small>
+      <small>${esc(line2)}${contact ? " · " + esc(contact) : ""}</small>
+      <small>${esc(c.email || "")}${c.web ? " · " + esc(c.web) : ""}${ids ? " · " + esc(ids) : ""}</small>
+    </div>
+  </div>
+  <div class="lh-title"><b>${esc(title)}</b>${sub ? `<span>${esc(sub)}</span>` : ""}</div>`;
+}
+function printHeader(parent, title, sub) {
+  const h = el("div", { class:"printhead" });
+  h.innerHTML = letterhead(title, sub);
+  parent.appendChild(h);
+}
+
+/* =========================================================================
+   Dashboard
+   ========================================================================= */
+
+/** The KPI row on its own, so the per-currency blocks can reuse it. */
+function dashboardKpis(parent) {
+  const all = txs();
+  const revenue = netRevenue(all);
+  const cost    = netCost(all);
+  const depn    = periodDepn("", today());
+  const profit  = revenue - cost - depn;
+  const kpis = el("div", { class:"kpis" });
+  const kpi = (k, v, note, cls = "") => kpis.appendChild(el("div", { class:"kpi " + cls },
+    `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="n">${esc(note || "")}</div>`));
+  kpi(t("revenue"), fmt0(revenue), "Customer invoices");
+  kpi(t("costs"), fmt0(cost), "Bills, expenses, salaries");
+  kpi(t("profit"), fmt0(profit), "Revenue − costs", profit >= 0 ? "good" : "crit");
+  kpi(t("cash"), fmt0(totalCash()), "Bank & cash");
+  kpi(t("ar"), fmt0(totalAR()), "Owed to us");
+  kpi(t("ap"), fmt0(totalAP()), "We owe");
+  const dep = depositsHeld();
+  if (dep) kpi(t("deposits"), fmt0(dep), "Guarantees held");
+  parent.appendChild(kpis);
+}
+
+function viewDashboard(m) {
+  if (!CUR) {
+    const list = currenciesInUse();
+    if (list.length > 1) {
+      pageHead(m, t("dashboard"), CO().name);
+      m.appendChild(el("p", { class:"card-note", style:"margin:-.5rem 0 1rem" },
+        "Figures are shown per currency — money in different currencies is never added together. " +
+        "Pick a currency in the top bar to see one set of numbers."));
+      list.forEach(c => {
+        const box = el("div", { class:"card" });
+        box.appendChild(el("h2", {}, c));
+        const prev = CUR; CUR = c;
+        dashboardKpis(box);
+        CUR = prev;
+        m.appendChild(box);
+      });
+      return;
+    }
+    CUR = list[0] || CO().currency || "YER";
+  }
+  const all = txs();
+  const revenue = netRevenue(all);
+  const cost    = netCost(all);
+  const depn    = periodDepn("", today());
+  const profit  = revenue - cost - depn;
+
+  pageHead(m, t("dashboard"), CO().name + " · " + CUR);
+  printHeader(m, "Management dashboard");
+
+  const kpis = el("div", { class:"kpis" });
+  const kpi = (k, v, note, cls = "") => kpis.appendChild(el("div", { class:"kpi " + cls },
+    `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="n">${esc(note || "")}</div>`));
+  kpi(t("revenue"), fmt0(revenue), "Customer invoices issued");
+  kpi(t("costs"), fmt0(cost), "Supplier bills, expenses, salaries");
+  kpi(t("profit"), fmt0(profit), "Revenue − costs − depreciation", profit >= 0 ? "good" : "crit");
+  kpi(t("cash"), fmt0(totalCash()), `Bank & cash in ${CUR}`);
+  kpi(t("ar"), fmt0(totalAR()), "Owed to us by customers");
+  kpi(t("ap"), fmt0(totalAP()), "Owed by us to suppliers");
+  const dep = depositsHeld();
+  if (dep) kpi(t("deposits"), fmt0(dep), "Guarantees & deposits, refundable");
+  if (rowsOf("assets").length)
+    kpi(t("assets"), fmt0(totalNBV()), `Net book value · cost ${fmt0(totalAssetCost())}`);
+  m.appendChild(kpis);
+
+  /* monthly trend */
+  const card = el("div", { class:"card" });
+  card.appendChild(el("h2", {}, "Revenue vs cost by month"));
+  const months = [...new Set(all.filter(x => isRevenue(x) || isCost(x)).map(x => monthOf(x.date)))].sort().slice(-6);
+  if (!months.length) card.appendChild(el("div", { class:"empty" }, esc(t("none"))));
+  else {
+    const data = months.map(mo => ({
+      mo,
+      rev: sum(all.filter(x => isRevenue(x) && monthOf(x.date) === mo), amountOf),
+      cst: sum(all.filter(x => isCost(x) && monthOf(x.date) === mo), amountOf)
+    }));
+    card.appendChild(el("div", { class:"legend" },
+      `<span><i style="background:var(--c-1)"></i>Revenue</span><span><i style="background:var(--c-2)"></i>Cost</span>`));
+    card.appendChild(barChart(data));
+    card.appendChild(trendTable(data));
+  }
+  m.appendChild(card);
+
+  /* top lists */
+  const two = el("div", { class:"grid" });
+  two.appendChild(topList("Top customers by revenue",
+    rowsOf("customers").map(c => ({ n:nameOf("customers", c.id),
+      v:sum(all.filter(x => isRevenue(x) && x.customerId === c.id), amountOf) }))));
+  two.appendChild(topList("Top expense categories",
+    rowsOf("categories").map(c => ({ n:nameOf("categories", c.id),
+      v:sum(all.filter(x => isCost(x) && x.categoryId === c.id), amountOf) }))));
+  m.appendChild(two);
+
+  /* open procurement by phase */
+  const ph = el("div", { class:"card" });
+  ph.appendChild(el("h2", {}, "Procurement pipeline"));
+  const wrap = el("div", { class:"tablewrap" });
+  const rows = PHASES.map(p => {
+    const list = all.filter(x => x.phase === p);
+    return `<tr><td>${esc(p)}</td><td class="num">${list.length}</td>
+      <td class="num">${fmt0(sum(list, amountOf))}</td></tr>`;
+  }).join("");
+  wrap.innerHTML = `<table><thead><tr><th>Phase</th><th class="num">Records</th>
+    <th class="num">Value</th></tr></thead><tbody>${rows}</tbody></table>`;
+  ph.appendChild(wrap);
+  m.appendChild(ph);
+}
+
+function barChart(data) {
+  const W = Math.max(520, data.length * 96), H = 220, pad = { t:14, r:12, b:34, l:64 };
+  const max = Math.max(1, ...data.flatMap(d => [d.rev, d.cst]));
+  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  const bw = Math.min(26, (iw / data.length - 10) / 2);
+  const y = v => pad.t + ih - (v / max) * ih;
+  let g = "";
+  for (let i = 0; i <= 4; i++) {
+    const yy = pad.t + ih - (ih * i / 4);
+    g += `<line x1="${pad.l}" x2="${W-pad.r}" y1="${yy}" y2="${yy}" stroke="var(--line)" stroke-width="1"/>
+          <text x="${pad.l-8}" y="${yy+4}" text-anchor="end" font-size="10" fill="var(--muted)"
+            font-family="var(--mono)">${fmt0(max*i/4)}</text>`;
+  }
+  data.forEach((d,i) => {
+    const cx = pad.l + (iw / data.length) * (i + .5);
+    [[d.rev,"var(--c-1)",-1],[d.cst,"var(--c-2)",1]].forEach(([v,col,dir]) => {
+      const h = Math.max(2, (v / max) * ih), x = cx + (dir < 0 ? -bw-1 : 1);
+      g += `<rect x="${x}" y="${y(v)}" width="${bw}" height="${h}" fill="${col}" rx="4" ry="4"><title>${
+        esc(d.mo)}: ${fmt0(v)}</title></rect>`;
+      if (v > 0) g += `<text x="${x+bw/2}" y="${y(v)-4}" text-anchor="middle" font-size="9.5"
+        fill="var(--ink-2)" font-family="var(--mono)">${fmt0(v)}</text>`;
+    });
+    g += `<text x="${cx}" y="${H-12}" text-anchor="middle" font-size="10.5" fill="var(--muted)">${esc(d.mo)}</text>`;
+  });
+  const box = el("div", { class:"chart" });
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img"
+    aria-label="Revenue versus cost by month">${g}</svg>`;
+  return box;
+}
+function trendTable(data) {
+  const wrap = el("div", { class:"tablewrap" }); wrap.style.marginTop = ".7rem";
+  wrap.innerHTML = `<table><thead><tr><th>Month</th><th class="num">Revenue</th>
+    <th class="num">Cost</th><th class="num">Margin</th></tr></thead><tbody>${
+    data.map(d => `<tr><td>${esc(d.mo)}</td><td class="num">${fmt0(d.rev)}</td>
+      <td class="num">${fmt0(d.cst)}</td><td class="num">${fmt0(d.rev - d.cst)}</td></tr>`).join("")
+    }</tbody></table>`;
+  return wrap;
+}
+function topList(title, items) {
+  const c = el("div", { class:"card" });
+  c.appendChild(el("h2", {}, esc(title)));
+  const rows = items.filter(x => x.v > 0).sort((a,b) => b.v - a.v).slice(0,5);
+  if (!rows.length) { c.appendChild(el("div", { class:"empty" }, esc(t("none")))); return c; }
+  const max = rows[0].v;
+  const wrap = el("div", { class:"tablewrap" });
+  wrap.innerHTML = `<table><tbody>${rows.map(r => `<tr><td>${esc(r.n)}</td>
+    <td style="width:45%"><div style="background:var(--c-1);height:8px;border-radius:4px;width:${
+      Math.max(4,(r.v/max)*100)}%"></div></td>
+    <td class="num">${fmt0(r.v)}</td></tr>`).join("")}</tbody></table>`;
+  c.appendChild(wrap);
+  return c;
+}
+
+/* =========================================================================
+   Daily entry — the single source of truth
+   ========================================================================= */
+
+let entryDraft = null;
+
+function viewDaily(m) {
+  pageHead(m, t("daily"), "Every business event is recorded here — one row per event.");
+  const card = el("div", { class:"card" });
+  card.appendChild(el("h2", {}, "New transaction"));
+  const form = el("form", { id:"entryForm" });
+  const g = el("div", { class:"grid" });
+
+  const d = entryDraft || { date:today(), type:"INVOICE OUT", status:"Draft" };
+
+  g.appendChild(fld("Date | التاريخ", `<input type="date" name="date" value="${esc(d.date)}" required>`));
+  g.appendChild(fld("Transaction type | نوع الحركة",
+    `<select name="type" id="typeSel" required>${TXTYPES.map(x =>
+      `<option value="${esc(x.v)}" ${x.v === d.type ? "selected" : ""}>${esc(x.v)} — ${esc(x.ar)}</option>`).join("")}</select>`));
+  g.appendChild(fld("Phase | المرحلة",
+    `<select name="phase">${PHASES.map(p => `<option ${p === typeOf(d.type).phase ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>`));
+  g.appendChild(fld("Case / file no | رقم الملف",
+    `<input name="caseNo" list="caseList" value="${esc(d.caseNo || "")}" placeholder="e.g. CASE-2026-014">
+     <datalist id="caseList">${caseNumbers().map(c => `<option value="${esc(c)}">`).join("")}</datalist>`));
+
+  g.appendChild(fld("Customer | العميل", refSelect("customerId","customers", d.customerId)));
+  g.appendChild(fld("Supplier | المورد", refSelect("supplierId","suppliers", d.supplierId)));
+  g.appendChild(fld("Employee | الموظف", refSelect("employeeId","employees", d.employeeId)));
+  g.appendChild(fld("Project | المشروع", refSelect("projectId","projects", d.projectId)));
+  g.appendChild(fld("Bank / cash account | الحساب", refSelect("accountId","accounts", d.accountId)));
+  g.appendChild(fld("Expense category | البند", refSelect("categoryId","categories", d.categoryId)));
+
+  g.appendChild(fld("Product / service | المنتج أو الخدمة",
+    `<select name="itemId"><option value=""></option>${rowsOf("items").map(it =>
+      `<option value="${esc(it.id)}">${esc(it.code ? it.code + " — " : "")}${esc(it.nameEn)}${
+        it.unit ? " (" + esc(it.unit) + ")" : ""}</option>`).join("")}</select>`));
+  g.appendChild(fld("Quantity | الكمية", `<input type="number" step="0.001" min="0" name="qty" placeholder="1">`));
+  g.appendChild(fld("Unit price | سعر الوحدة", `<input type="number" step="0.01" min="0" name="unitPrice" placeholder="0.00">`));
+  g.appendChild(fld("Line discount | خصم السطر", `<input type="number" step="0.01" min="0" name="discount" placeholder="0">`));
+  g.appendChild(fld("Amount | المبلغ", `<input type="number" step="0.01" min="0" name="amount" value="${
+    d.amount || ""}" placeholder="0.00">`));
+  g.appendChild(fld("Is this a fixed asset? | أصل ثابت؟",
+    `<select name="isAsset"><option>No</option><option>Yes</option></select>`));
+  g.appendChild(fld("Asset tag / serial | رقم الأصل", `<input name="assetTag" placeholder="added to the asset register">`));
+  g.appendChild(fld("Location | الموقع", `<input name="assetLocation" placeholder="office, store, site">`));
+  g.appendChild(fld("Status | الحالة",
+    `<select name="status">${STATUSES.map(s => `<option ${s === d.status ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`));
+  g.appendChild(fld("Reference no | رقم المرجع", `<input name="refNo" value="${esc(d.refNo || "")}" placeholder="INV-1024 / PO-88">`));
+  g.appendChild(fld("Against document | مقابل مستند",
+    `<input name="againstRef" placeholder="original invoice being returned or refunded">`));
+  g.appendChild(fld("Document type | نوع المستند",
+    `<select name="docType"><option value=""></option>${DOCTYPES.map(x => `<option>${esc(x)}</option>`).join("")}</select>`));
+  g.appendChild(fld("Document file / link | المستند", `<input name="docRef" placeholder="quotation-1024.pdf or Drive link">`));
+  form.appendChild(g);
+  form.appendChild(fld("Notes | ملاحظات", `<textarea name="notes" rows="2"></textarea>`));
+
+  const bar = el("div", { class:"actions", style:"display:flex;gap:.5rem;margin-top:.9rem" });
+  const submit = el("button", { class:"btn gold", type:"submit" }, t("save"));
+  if (!canEdit()) submit.setAttribute("disabled","");
+  bar.appendChild(submit);
+  const hint = el("div", { class:"card-note", style:"align-self:center" });
+  bar.appendChild(hint);
+  form.appendChild(bar);
+  card.appendChild(form);
+  m.appendChild(card);
+
+  const syncHint = () => {
+    const ty = typeOf(form.type.value);
+    form.phase.value = ty.phase;
+    const rt = { "SALES RETURN":"Reduces sales and what this customer owes.",
+                 "PURCHASE RETURN":"Reduces purchases and what we owe this supplier.",
+                 "REFUND TO CUSTOMER":"Money paid back to the customer, settling their credit.",
+                 "REFUND FROM SUPPLIER":"Money received back from the supplier." }[ty.v];
+    hint.textContent = rt ? rt + (ty.cash ? " Moves the selected account." : "")
+      : ty.fin
+      ? `Amount will be posted to the ${ty.side.toUpperCase()} column` + (ty.cash ? " and will move the selected account." : ".")
+      : "No financial posting — this is a procurement document only.";
+  };
+  // Selling price for anything going out to a customer, purchase price for
+  // anything coming in from a supplier; quantity × unit price fills the amount.
+  const priceForType = it => {
+    const ty = typeOf(form.type.value);
+    const outward = /OUT$/.test(ty.v) || ty.party === "customer";
+    return num(outward ? it.salePrice : it.costPrice) || num(it.salePrice) || num(it.costPrice);
+  };
+  const recalc = () => {
+    const q = num(form.qty.value), p = num(form.unitPrice.value);
+    if (q > 0 && p > 0) form.amount.value = Math.max(0, q * p - num(form.discount.value)).toFixed(2);
+  };
+  form.itemId.onchange = () => {
+    const it = byId("items", form.itemId.value);
+    if (!it) return;
+    if (!num(form.qty.value)) form.qty.value = 1;
+    form.unitPrice.value = priceForType(it) || "";
+    // catalogue items marked as assets pre-tick the flag on a purchase
+    if (it.isAsset === "Yes" && isPurchase(form.type.value)) form.isAsset.value = "Yes";
+    recalc();
+  };
+  form.qty.oninput = recalc;
+  form.unitPrice.oninput = recalc;
+  form.discount.oninput = recalc;
+  form.type.onchange = () => { syncHint(); if (form.itemId.value) form.itemId.onchange(); };
+  syncHint();
+
+  form.onsubmit = e => {
+    e.preventDefault();
+    if (!canEdit()) return toast("Your role is read-only.");
+    const f = Object.fromEntries(new FormData(form).entries());
+    const ty = typeOf(f.type);
+    const amount = num(f.amount);
+    if (ty.fin && amount <= 0) return toast("Enter an amount greater than zero.");
+    if (ty.cash && !f.accountId) return toast("Select the bank or cash account used.");
+    if (f.isAsset === "Yes" && !isPurchase(f.type))
+      return toast("Only a purchase (supplier bill, expense or payment out) can create an asset.");
+    const warn = duplicateTxWarning({ date:f.date, type:f.type, amount, refNo:f.refNo,
+      customerId:f.customerId, supplierId:f.supplierId, employeeId:f.employeeId });
+    if (warn && !confirm(warn)) return;
+    const now = new Date().toISOString();
+    const tx = {
+      id: nextId("TRX"), date:f.date, type:f.type, phase:f.phase, caseNo:f.caseNo.trim(),
+      customerId:f.customerId, supplierId:f.supplierId, employeeId:f.employeeId,
+      projectId:f.projectId, accountId:f.accountId, categoryId:f.categoryId,
+      itemId:f.itemId, qty:num(f.qty), unitPrice:num(f.unitPrice), discount:num(f.discount), isAsset:f.isAsset,
+      currency:(byId("accounts", f.accountId) || {}).currency || CO().currency || "YER",
+      debit: ty.side === "debit" ? amount : 0,
+      credit: ty.side === "credit" ? amount : 0,
+      status:f.status, refNo:f.refNo, againstRef:f.againstRef, docType:f.docType, docRef:f.docRef, notes:f.notes,
+      createdBy:(USER ? USER.username : ""), createdAt:now, updatedAt:now
+    };
+    DB.transactions.push(tx);
+    const asset = f.isAsset === "Yes" ? registerAssetFrom(tx, f) : null;
+    save();
+    entryDraft = { date:f.date, type:f.type, caseNo:f.caseNo, status:"Draft" };
+    toast(asset ? `Saved ${tx.id} · asset ${asset.id} added to the register` : `Saved ${tx.id}`);
+    render();
+  };
+
+  /* recent rows */
+  const recent = DB.transactions.slice(-12).reverse();
+  const c2 = el("div", { class:"card" });
+  c2.appendChild(el("h2", {}, "Last 12 entries"));
+  c2.appendChild(txTable(recent));
+  m.appendChild(c2);
+}
+
+/* -------------------------------------------------------------------------
+   Duplicate guard — the same bill reaches the office twice, two people enter
+   the same payment, or Save is tapped twice on a slow phone. Before a new
+   transaction is written we look for one already recorded that looks like it,
+   show what was found and let the user decide. Nothing is ever blocked.
+   ------------------------------------------------------------------------- */
+
+const DUP_DAYS = 3;              // how far apart two entries can be and still look alike
+const DUP_AMOUNT_TOLERANCE = 1;  // percent — covers rounding and small fee differences
+
+const dayDiff = (a, b) => {
+  const x = new Date(a + "T00:00:00").getTime(), y = new Date(b + "T00:00:00").getTime();
+  return (isNaN(x) || isNaN(y)) ? null : Math.abs(x - y) / 86400000;
+};
+const sameParty = (a, b) =>
+  (a.customerId || "") === (b.customerId || "") &&
+  (a.supplierId || "") === (b.supplierId || "") &&
+  (a.employeeId || "") === (b.employeeId || "");
+const closeAmount = (a, b) => {
+  if (a <= 0 || b <= 0) return a === b;
+  return Math.abs(a - b) <= Math.max(a, b) * DUP_AMOUNT_TOLERANCE / 100;
+};
+
+/** Transactions already recorded that look like `cand`, most recent first. */
+function similarTransactions(cand, list) {
+  list = list || DB.transactions;
+  const ref = (cand.refNo || "").trim().toLowerCase();
+  const amount = num(cand.amount);
+  return list.filter(x => {
+    if (!x || x.id === cand.id) return false;                      // never match itself
+    // Same reference number is a duplicate on its own — that is what a reference is for.
+    if (ref && (x.refNo || "").trim().toLowerCase() === ref) return true;
+    if (x.type !== cand.type) return false;
+    if (!sameParty(x, cand)) return false;
+    if (!closeAmount(amountOf(x), amount)) return false;
+    const dd = dayDiff(x.date, cand.date);
+    return dd !== null && dd <= DUP_DAYS;
+  }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+}
+
+/** The confirm() text for a near-duplicate — "" when nothing looks similar. */
+function duplicateTxWarning(cand, list) {
+  const dups = similarTransactions(cand, list);
+  if (!dups.length) return "";
+  const d = dups[0];
+  const party = nameOf("customers", d.customerId) || nameOf("suppliers", d.supplierId)
+             || nameOf("employees", d.employeeId) || "";
+  const line = [d.id, d.date, d.type, fmt(amountOf(d)) + " " + (d.currency || ""), party,
+                d.refNo ? "Ref " + d.refNo : ""].filter(Boolean).join(" · ");
+  const ar = LANG === "ar";
+  let msg = (ar ? "\u26a0\ufe0f توجد حركة مشابهة مسجّلة بالفعل:\n" : "\u26a0\ufe0f A similar transaction is already recorded:\n") + line;
+  if (dups.length > 1)
+    msg += ar ? `\n(ويوجد ${dups.length - 1} إدخال قريب آخر)` : `\n(and ${dups.length - 1} other close entry/entries)`;
+  return msg + (ar ? "\n\nهل تريد المتابعة والحفظ على أي حال؟"
+                   : "\n\nDo you want to continue and save it anyway?");
+}
+
+/** Purchase-side transactions are the ones that can bring an asset into the company. */
+const isPurchase = type => ["INVOICE IN","EXPENSE","PAYMENT OUT"].includes(type);
+
+/** Creates the asset register entry behind a purchase marked as a fixed asset. */
+function registerAssetFrom(tx, f) {
+  const it = byId("items", tx.itemId);
+  const now = new Date().toISOString();
+  const asset = {
+    id: nextId("AST"),
+    tag: (f.assetTag || "").trim(),
+    nameEn: it ? it.nameEn : (f.notes || "Asset from " + tx.id),
+    nameAr: it ? it.nameAr || "" : "",
+    category: it && /vehicle/i.test(it.category || "") ? "Vehicles" : "Other",
+    itemId: tx.itemId || "",
+    serial: (f.assetTag || "").trim(),
+    location: (f.assetLocation || "").trim(),
+    supplierId: tx.supplierId || "",
+    acquiredOn: tx.date,
+    qty: num(tx.qty) || 1,
+    cost: amountOf(tx),
+    lifeYears: it ? num(it.lifeYears) || 5 : 5,
+    salvage: 0,
+    method: "Straight line",
+    status: "In use",
+    source: "Purchased",
+    sourceTx: tx.id,
+    createdAt: now, updatedAt: now
+  };
+  DB.assets.push(asset);
+  return asset;
+}
+
+function fld(label, inner) {
+  const [en, ar] = label.split("|");
+  const f = el("div", { class:"field" });
+  f.innerHTML = `<label>${esc(en.trim())} ${ar ? `<span class="ar">${esc(ar.trim())}</span>` : ""}</label>${inner}`;
+  return f;
+}
+function refSelect(name, tbl, val) {
+  return `<select name="${name}"><option value=""></option>${rowsOf(tbl).map(r =>
+    `<option value="${esc(r.id)}" ${r.id === val ? "selected" : ""}>${esc(r.nameEn)}</option>`).join("")}</select>`;
+}
+const caseNumbers = () => [...new Set(DB.transactions.map(x => x.caseNo).filter(Boolean))].sort();
+
+function txTable(list, opts = {}) {
+  const wrap = el("div", { class:"tablewrap" });
+  if (!list.length) { wrap.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; return wrap; }
+  const body = list.map(tx => `<tr>
+    <td>${esc(tx.id)}</td><td>${esc(tx.date)}</td><td>${esc(tx.type)}</td>
+    <td>${esc(tx.caseNo || "")}</td>
+    <td>${esc(nameOf("customers",tx.customerId) || nameOf("suppliers",tx.supplierId) || nameOf("employees",tx.employeeId) || "")}</td>
+    <td>${esc(nameOf("projects",tx.projectId))}</td>
+    <td>${esc(nameOf("accounts",tx.accountId))}</td>
+    <td class="num">${num(tx.debit) ? fmt(tx.debit) : ""}</td>
+    <td class="num">${num(tx.credit) ? fmt(tx.credit) : ""}</td>
+    <td><span class="pill ${esc((tx.status||"draft").toLowerCase())}">${esc(tx.status)}</span></td>
+    <td>${esc(tx.refNo || "")}</td><td>${esc(tx.docRef || "")}</td>
+    <td class="noprint"><div class="rowactions">
+      ${tx.refNo ? `<button class="linkbtn" data-act="doc" data-ref="${esc(tx.refNo)}">Form</button>` : ""}
+      <button class="linkbtn" data-act="edit" data-id="${esc(tx.id)}">${esc(t("edit"))}</button>
+      <button class="linkbtn" data-act="del" data-id="${esc(tx.id)}">${esc(t("del"))}</button>
+    </div></td></tr>`).join("");
+  wrap.innerHTML = `<table><thead><tr>
+    <th>ID</th><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th><th>Case</th><th>Party</th>
+    <th>Project</th><th>Account</th><th class="num">${esc(t("debit"))}</th><th class="num">${esc(t("credit"))}</th>
+    <th>${esc(t("status"))}</th><th>${esc(t("ref"))}</th><th>Document</th><th class="noprint"></th>
+    </tr></thead><tbody>${body}</tbody>
+    <tfoot><tr><td colspan="7">${esc(t("total"))}</td>
+      <td class="num">${fmt(sum(list, x => x.debit))}</td>
+      <td class="num">${fmt(sum(list, x => x.credit))}</td>
+      <td colspan="4"></td></tr></tfoot></table>`;
+  wrap.querySelectorAll("[data-act]").forEach(b => {
+    b.onclick = () => {
+      if (b.dataset.act === "doc") { rep.doc = b.dataset.ref; return go("r_document"); }
+      const tx = DB.transactions.find(x => x.id === b.dataset.id);
+      if (!tx) return;
+      if (b.dataset.act === "del") {
+        if (!canEdit()) return toast("Your role is read-only.");
+        if (confirm(`Delete ${tx.id}?`)) {
+          DB.transactions = DB.transactions.filter(x => x.id !== tx.id); save(); render();
+        }
+      } else editTx(tx);
+    };
+  });
+  return wrap;
+}
+
+function editTx(tx) {
+  const ty = typeOf(tx.type);
+  modal("Edit " + tx.id, [
+    { k:"date", l:"Date", t:"date", v:tx.date },
+    { k:"amount", l:"Amount", t:"number", v:amountOf(tx) },
+    { k:"status", l:"Status", t:"select", opts:STATUSES, v:tx.status },
+    { k:"caseNo", l:"Case / file no", v:tx.caseNo },
+    { k:"refNo", l:"Reference no", v:tx.refNo },
+    { k:"docRef", l:"Document file / link", v:tx.docRef },
+    { k:"notes", l:"Notes", t:"textarea", v:tx.notes }
+  ], vals => {
+    if (!canEdit()) return toast("Your role is read-only.");
+    if (vals.status === "Approved" && tx.status === "Draft" && !canApprove())
+      return toast("Only a Reviewer can approve.");
+    Object.assign(tx, vals);
+    const amt = num(vals.amount);
+    tx.debit  = ty.side === "debit"  ? amt : 0;
+    tx.credit = ty.side === "credit" ? amt : 0;
+    tx.updatedAt = new Date().toISOString();
+    save(); render(); toast("Updated " + tx.id);
+  });
+}
+
+/* =========================================================================
+   Ledger (all transactions, filterable)
+   ========================================================================= */
+
+let ledgerFilter = { from:"", to:"", type:"", status:"", q:"" };
+
+function viewLedger(m) {
+  pageHead(m, t("ledger"), "Daily_Transactions — the single source of truth", [
+    { label:t("print"), on:() => doPrint("Transactions") },
+    { label:"Download Excel", on:() => reportToXlsx("Transactions") },
+    { label:"Export CSV", on:() => exportTransactionsCsv() }
+  ]);
+  printHeader(m, "Transactions", `${ledgerFilter.from || "start"} → ${ledgerFilter.to || today()}`);
+
+  const bar = el("div", { class:"toolbar noprint" });
+  bar.appendChild(fld("From | من", `<input type="date" id="f_from" value="${esc(ledgerFilter.from)}">`));
+  bar.appendChild(fld("To | إلى", `<input type="date" id="f_to" value="${esc(ledgerFilter.to)}">`));
+  bar.appendChild(fld("Type | النوع", `<select id="f_type"><option value=""></option>${
+    TXTYPES.map(x => `<option ${x.v === ledgerFilter.type ? "selected" : ""}>${esc(x.v)}</option>`).join("")}</select>`));
+  bar.appendChild(fld("Status | الحالة", `<select id="f_status"><option value=""></option>${
+    STATUSES.map(s => `<option ${s === ledgerFilter.status ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`));
+  bar.appendChild(fld("Search | بحث", `<input id="f_q" value="${esc(ledgerFilter.q)}" placeholder="reference, case, note">`));
+  const apply = el("button", { class:"btn sm" }, "Apply");
+  apply.onclick = () => {
+    ledgerFilter = { from:$("#f_from").value, to:$("#f_to").value, type:$("#f_type").value,
+                     status:$("#f_status").value, q:$("#f_q").value.trim().toLowerCase() };
+    render();
+  };
+  bar.appendChild(apply);
+  m.appendChild(bar);
+
+  let list = txs({ from:ledgerFilter.from, to:ledgerFilter.to, type:ledgerFilter.type, status:ledgerFilter.status });
+  if (ledgerFilter.q) {
+    const q = ledgerFilter.q;
+    list = list.filter(x => [x.refNo, x.caseNo, x.notes, x.docRef, x.id]
+      .some(v => String(v || "").toLowerCase().includes(q)));
+  }
+  m.appendChild(txTable(list));
+}
+
+function exportTransactionsCsv() {
+  const cols = ["id","date","type","phase","caseNo","customerId","supplierId","employeeId","projectId",
+                "accountId","categoryId","itemId","qty","unitPrice","discount","isAsset","debit","credit","status","refNo","againstRef",
+                "docType","docRef","notes","createdBy"];
+  const refTbl = { customerId:"customers", supplierId:"suppliers", employeeId:"employees",
+                   projectId:"projects", accountId:"accounts", categoryId:"categories", itemId:"items" };
+  const head = cols.join(",");
+  const body = DB.transactions.map(tx => cols.map(c => csvCell(
+    refTbl[c] ? (tx[c] ? `${tx[c]} ${nameOf(refTbl[c], tx[c]) || ""}`.trim() : "") : tx[c]
+  )).join(",")).join("\n");
+  saveFile(`environmsafe-transactions-${today()}.csv`, head + "\n" + body, "text/csv");
+}
+const csvCell = v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
+
+/* =========================================================================
+   Procurement files (cases) — links the phases of one deal
+   ========================================================================= */
+
+function viewCases(m) {
+  pageHead(m, t("cases"), "Every document of one deal, grouped by case number");
+  const cases = caseNumbers();
+  if (!cases.length) {
+    m.appendChild(el("div", { class:"card" },
+      `<div class="empty">No case numbers yet. Type a case number (e.g. CASE-2026-001) in the daily entry
+       screen and reuse it for every RFQ, quotation, PO, invoice and payment of that deal.</div>`));
+    return;
+  }
+  cases.forEach(cn => {
+    const list = DB.transactions.filter(x => x.caseNo === cn)
+      .sort((a,b) => (a.date + a.id).localeCompare(b.date + b.id));
+    const rev = netRevenue(list), cst = netCost(list);
+    const card = el("div", { class:"card" });
+    card.appendChild(el("h2", {}, esc(cn)));
+    card.appendChild(el("div", { class:"card-note" },
+      `Revenue ${fmt0(rev)} · Cost ${fmt0(cst)} · Margin ${fmt0(rev - cst)}`));
+    const done = new Set(list.map(x => x.phase));
+    card.appendChild(el("div", { style:"display:flex;flex-wrap:wrap;gap:.3rem;margin:.6rem 0" },
+      PHASES.map(p => `<span class="pill ${done.has(p) ? "approved" : "draft"}">${esc(p)}${
+        done.has(p) ? " ✓" : ""}</span>`).join("")));
+    card.appendChild(txTable(list));
+    m.appendChild(card);
+  });
+}
+
+/* =========================================================================
+   Master data (generic CRUD)
+   ========================================================================= */
+
+function viewMaster(m, tbl) {
+  const S = SCHEMAS[tbl]; if (!S) return;
+  if (tbl === "users" && !isAdmin()) {
+    m.appendChild(el("div", { class:"card" },
+      `<div class="empty">Only an Administrator can manage users.</div>`));
+    return;
+  }
+  const actions = [{ label:t("add"), cls:"gold", on:() => editMaster(tbl, null), disabled:!canEdit() }];
+  if (tbl !== "users") actions.push(
+    { label:"Export CSV", on:() => exportMasterCsv(tbl) },
+    { label:"Import CSV", on:() => importMasterCsv(tbl), disabled:!canEdit() });
+  pageHead(m, LANG === "ar" ? S.ar : S.en, `${rowsOf(tbl).length} records`, actions);
+  if (tbl === "users") m.appendChild(el("p", { class:"card-note", style:"margin:-.5rem 0 .9rem" },
+    "Passwords are stored as salted hashes on this device. Sign-in keeps other people out of the " +
+    "app; it does not encrypt the data file, so keep backups somewhere safe."));
+  const wrap = el("div", { class:"tablewrap" });
+  const rows = rowsOf(tbl);
+  if (!rows.length) wrap.innerHTML = `<div class="empty">${esc(t("none"))}</div>`;
+  else {
+    const cols = S.cols;
+    const balCol = tbl === "customers" || tbl === "suppliers" || tbl === "accounts";
+    wrap.innerHTML = `<table><thead><tr><th>ID</th>${
+      cols.map(c => `<th>${esc((S.fields.find(f => f.k === c) || {}).l || c)}</th>`).join("")
+      }${balCol ? `<th class="num">${esc(t("balance"))}</th>` : ""}<th></th></tr></thead><tbody>${
+      rows.map(r => `<tr><td>${esc(r.id)}</td>${cols.map(c => {
+        const f = S.fields.find(x => x.k === c) || {};
+        const v = f.t === "ref" ? nameOf(f.ref, r[c]) : (f.t === "number" ? fmt(r[c]) : r[c]);
+        return `<td class="${f.t === "number" ? "num" : ""}">${esc(v || "")}</td>`;
+      }).join("")}${balCol ? `<td class="num">${fmt(
+        tbl === "customers" ? customerBalance(r.id) :
+        tbl === "suppliers" ? supplierBalance(r.id) : accountBalance(r.id))}</td>` : ""}
+      <td class="noprint"><div class="rowactions">
+        <button class="linkbtn" data-e="${esc(r.id)}">${esc(t("edit"))}</button>
+        ${tbl === "users" ? `<button class="linkbtn" data-p="${esc(r.id)}">Password</button>` : ""}
+        <button class="linkbtn" data-d="${esc(r.id)}">${esc(t("del"))}</button></div></td></tr>`).join("")
+      }</tbody></table>`;
+  }
+  wrap.querySelectorAll("[data-e]").forEach(b => b.onclick = () => editMaster(tbl, b.dataset.e));
+  wrap.querySelectorAll("[data-p]").forEach(b => b.onclick = () => resetPassword(b.dataset.p));
+  wrap.querySelectorAll("[data-d]").forEach(b => b.onclick = () => {
+    if (!canEdit()) return toast("Your role is read-only.");
+    const used = DB.transactions.some(x => Object.values(x).includes(b.dataset.d));
+    if (used) return toast("Cannot delete — this record is used in transactions.");
+    if (confirm("Delete this record?")) { DB[tbl] = rowsOf(tbl).filter(r => r.id !== b.dataset.d); save(); render(); }
+  });
+  m.appendChild(wrap);
+}
+
+function editMaster(tbl, id) {
+  if (!canEdit()) return toast("Your role is read-only.");
+  if (tbl === "users" && !isAdmin()) return toast("Only an Administrator can manage users.");
+  const S = SCHEMAS[tbl];
+  const rec = id ? byId(tbl, id) : null;
+  const fields = S.fields.map(f => Object.assign({}, f, { v: rec ? rec[f.k] : "" }));
+  if (tbl === "users" && !rec) fields.push({ k:"password", l:"Password (at least 6 characters)", t:"password", req:true });
+  modal((rec ? t("edit") : t("add")) + " — " + S.en, fields, async vals => {
+    if (!vals.nameEn) return toast("Name is required.");
+    const now = new Date().toISOString();
+    if (tbl === "users") {
+      const clash = userByName(vals.username);
+      if (!vals.username) return toast("A username is required.");
+      if (clash && (!rec || clash.id !== rec.id)) return toast("That username is already taken.");
+      if (!rec && (vals.password || "").length < 6) return toast("Use at least 6 characters.");
+      if (rec && rec.id === (USER || {}).id && vals.role !== "Administrator")
+        return toast("You cannot remove your own Administrator role.");
+    }
+    const password = vals.password; delete vals.password;
+    if (rec) { Object.assign(rec, vals, { updatedAt:now }); }
+    else {
+      const row = Object.assign({ id:nextId(S.prefix), createdAt:now, updatedAt:now }, vals);
+      if (tbl === "users") {
+        row.active = row.active || "Yes";
+        // the administrator knows this password, so the user picks their own on first sign-in
+        row.mustChange = "Yes";
+        await setPassword(row, password);
+      }
+      DB[tbl].push(row);
+    }
+    save(); render(); toast("Saved");
+  });
+}
+
+function resetPassword(id) {
+  if (!isAdmin()) return toast("Only an Administrator can reset passwords.");
+  const u = byId("users", id); if (!u) return;
+  modal(`Set password — ${u.nameEn}`, [
+    { k:"p1", l:"New password", t:"password", req:true },
+    { k:"p2", l:"Repeat new password", t:"password", req:true }
+  ], async vals => {
+    if (vals.p1.length < 6) return toast("Use at least 6 characters.");
+    if (vals.p1 !== vals.p2) return toast("The two passwords do not match.");
+    await setPassword(u, vals.p1);
+    u.mustChange = u.id === (USER || {}).id ? "No" : "Yes";
+    save(); render(); toast(`Password set for ${u.username}`);
+  });
+}
+
+function exportMasterCsv(tbl) {
+  const S = SCHEMAS[tbl];
+  const cols = ["id", ...S.fields.map(f => f.k)];
+  const csv = [cols.join(","), ...rowsOf(tbl).map(r => cols.map(c => csvCell(r[c])).join(","))].join("\n");
+  saveFile(`environmsafe-${tbl}-${today()}.csv`, csv, "text/csv");
+}
+
+function importMasterCsv(tbl) {
+  const S = SCHEMAS[tbl];
+  const inp = el("input", { type:"file", accept:".csv,text/csv" });
+  inp.onchange = () => {
+    const file = inp.files[0]; if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const rows = parseCsv(String(rd.result));
+        if (rows.length < 2) return toast("The file has no data rows.");
+        const head = rows[0].map(h => h.trim());
+        const keys = S.fields.map(f => f.k);
+        const map = head.map(h => {
+          const hit = keys.find(k => k.toLowerCase() === h.toLowerCase()) ||
+                      (/name/i.test(h) && !/arab/i.test(h) ? "nameEn" : "") ||
+                      (/arab/i.test(h) ? "nameAr" : "") ||
+                      (/phone|mobile|tel/i.test(h) ? "phone" : "") ||
+                      (/mail/i.test(h) ? "email" : "") ||
+                      (/address|location/i.test(h) ? "address" : "") ||
+                      (/contact|person/i.test(h) ? "contact" : "");
+          return hit || null;
+        });
+        let n = 0; const now = new Date().toISOString();
+        rows.slice(1).forEach(r => {
+          const rec = {}; map.forEach((k,i) => { if (k) rec[k] = (r[i] || "").trim(); });
+          if (!rec.nameEn) return;
+          DB[tbl].push(Object.assign({ id:nextId(S.prefix), createdAt:now, updatedAt:now }, rec)); n++;
+        });
+        save(); render(); toast(`Imported ${n} records`);
+      } catch (e) { toast("Could not read that CSV file."); }
+    };
+    rd.readAsText(file);
+  };
+  inp.click();
+}
+function parseCsv(text) {
+  const rows = []; let row = [], cur = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"' && text[i+1] === '"') { cur += '"'; i++; }
+      else if (c === '"') q = false;
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+    else if (c !== "\r") cur += c;
+  }
+  if (cur || row.length) { row.push(cur); rows.push(row); }
+  return rows.filter(r => r.some(c => c !== ""));
+}
+
+/* =========================================================================
+   Reports
+   ========================================================================= */
+
+let rep = { from:"", to:"", entity:"" };
+
+function viewReport(m, kind) {
+  const titles = { summary:t("r_summary"), customer:t("r_customer"), supplier:t("r_supplier"),
+                   project:t("r_project"), employee:t("r_employee"), bank:t("r_bank"),
+                   item:t("r_item"), asset:t("r_asset"), document:t("r_document") };
+  pageHead(m, titles[kind], CO().name, [
+    { label:t("print"), cls:"gold", on:() => doPrint(titles[kind]) },
+    { label:"Download Excel", on:() => reportToXlsx(titles[kind]) }
+  ]);
+  // official documents carry their own letterhead
+  if (kind !== "document") printHeader(m, titles[kind], `${rep.from || "start"} → ${rep.to || today()}`);
+
+  const bar = el("div", { class:"toolbar noprint" });
+  bar.appendChild(fld("From | من", `<input type="date" id="r_from" value="${esc(rep.from)}">`));
+  bar.appendChild(fld("To | إلى", `<input type="date" id="r_to" value="${esc(rep.to)}">`));
+  const entTbl = { customer:"customers", supplier:"suppliers", project:"projects",
+                   employee:"employees", bank:"accounts", item:"items", asset:"assets" }[kind];
+  if (entTbl) bar.appendChild(fld("Select | اختر",
+    `<select id="r_ent"><option value="">— all —</option>${rowsOf(entTbl).map(r =>
+      `<option value="${esc(r.id)}" ${r.id === rep.entity ? "selected" : ""}>${esc(r.nameEn)}</option>`).join("")}</select>`));
+  const go2 = el("button", { class:"btn sm" }, "Run");
+  go2.onclick = () => {
+    rep = { from:$("#r_from").value, to:$("#r_to").value, entity: entTbl ? $("#r_ent").value : "" };
+    render();
+  };
+  bar.appendChild(go2);
+  m.appendChild(bar);
+
+  if (kind === "asset")    return repAssets(m);
+  if (kind === "item")     return repItems(m);
+  if (kind === "document") return repDocuments(m);
+  if (kind === "summary")  return repSummary(m);
+  if (kind === "customer") return repParty(m, "customers");
+  if (kind === "supplier") return repParty(m, "suppliers");
+  if (kind === "project")  return repProject(m);
+  if (kind === "employee") return repEmployee(m);
+  if (kind === "bank")     return repBank(m);
+}
+
+/* =========================================================================
+   Printing and exporting
+   Android's WebView does not implement window.print(), and an embedded preview
+   frame blocks it, so printing goes through the host app when it is there and
+   says so plainly when the surface will not allow it.
+   ========================================================================= */
+
+const EMBEDDED = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+
+function doPrint(jobName) {
+  const name = (jobName || "EnvironmSafe report").replace(/[^\w .-]/g, " ").trim();
+  if (window.AndroidBridge && window.AndroidBridge.printPage) {
+    try { AndroidBridge.printPage(name); return; } catch (e) { /* fall through */ }
+  }
+  if (EMBEDDED) {
+    toast("Printing is blocked inside this preview — open the app, or save the system file and open it in Chrome.");
+  }
+  try { window.print(); } catch (e) {
+    toast("This browser would not open the print dialogue. Use Download Excel instead.");
+  }
+}
+
+/** Whatever report is on screen, as a spreadsheet — headings, tables and totals. */
+function reportToXlsx(titleText) {
+  const c = CO();
+  const head = document.querySelector(".page-head h1");
+  const title = titleText || (head ? head.textContent.trim() : "Report");
+  const rows = [];
+  rows.push([{ v:c.name, s:2 }]);
+  if (c.addressLine || c.address) rows.push([c.addressLine || c.address]);
+  rows.push([[c.email, c.phone].filter(Boolean).join("  ·  ")]);
+  rows.push([]);
+  rows.push([{ v:title, s:1 }]);
+  rows.push([`Period: ${rep.from || "start"} → ${rep.to || today()}`]);
+  if (CUR) rows.push([`Currency: ${CUR}`]);
+  rows.push([]);
+
+  let widest = 3;
+  document.querySelectorAll("#main h2, #main table").forEach(node => {
+    if (node.tagName === "H2") {
+      rows.push([]);
+      rows.push([{ v:node.textContent.trim(), s:2 }]);
+      return;
+    }
+    node.querySelectorAll("tr").forEach(tr => {
+      const cells = [];
+      Array.from(tr.children).forEach(td => {
+        if (td.classList.contains("noprint")) return;
+        const text = td.textContent.replace(/\s+/g, " ").trim();
+        const isHead = td.tagName === "TH";
+        const n = parseFloat(text.replace(/,/g, ""));
+        if (td.classList.contains("num") && text !== "" && isFinite(n) && !isHead)
+          cells.push({ v:n, s:5, num:true });
+        else if (isHead) cells.push({ v:text, s:4 });
+        else cells.push(text);
+      });
+      if (cells.length) { rows.push(cells); widest = Math.max(widest, cells.length); }
+    });
+    rows.push([]);
+  });
+
+  const widths = Array.from({ length: widest }, (_, i) => (i === 1 ? 34 : i === 0 ? 14 : 16));
+  const stamp = today();
+  saveXlsx(`${title.replace(/[^\w -]/g, "").trim() || "report"} ${stamp}.xlsx`,
+           title.slice(0, 28), rows, { widths });
+}
+
+/* =========================================================================
+   Excel export — a real .xlsx written here, so the official form arrives as a
+   spreadsheet as well as a PDF. Store-only ZIP, inline strings, a few styles.
+   ========================================================================= */
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+/** Minimal ZIP container: no compression, which keeps this short and valid. */
+function zipFiles(files) {
+  const enc = new TextEncoder();
+  const chunks = [], central = [];
+  let offset = 0;
+  const u16 = n => [n & 0xFF, (n >>> 8) & 0xFF];
+  const u32 = n => [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF];
+
+  files.forEach(f => {
+    const name = enc.encode(f.name), data = enc.encode(f.data);
+    const crc = crc32(data);
+    const local = [...u32(0x04034b50), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+                   ...u32(crc), ...u32(data.length), ...u32(data.length),
+                   ...u16(name.length), ...u16(0)];
+    chunks.push(new Uint8Array(local), name, data);
+    central.push({ name, crc, size: data.length, offset });
+    offset += local.length + name.length + data.length;
+  });
+
+  const dir = [];
+  central.forEach(e => {
+    dir.push(...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+             ...u32(e.crc), ...u32(e.size), ...u32(e.size), ...u16(e.name.length),
+             ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(e.offset));
+    dir.push(...e.name);
+  });
+  const dirBytes = new Uint8Array(dir);
+  const end = new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0),
+                              ...u16(central.length), ...u16(central.length),
+                              ...u32(dirBytes.length), ...u32(offset), ...u16(0)]);
+  const total = chunks.reduce((n, c) => n + c.length, 0) + dirBytes.length + end.length;
+  const out = new Uint8Array(total);
+  let at = 0;
+  chunks.forEach(c => { out.set(c, at); at += c.length; });
+  out.set(dirBytes, at); at += dirBytes.length;
+  out.set(end, at);
+  return out;
+}
+
+const xmlEsc = v => String(v ?? "").replace(/[&<>"']/g, ch =>
+  ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&apos;" }[ch]));
+const colName = n => { let s = ""; n++; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = (n - 1 - m) / 26; } return s; };
+
+/** rows: array of arrays of {v, s, num} — s is a style index into the sheet below. */
+function sheetXml(rows, opts = {}) {
+  const body = rows.map((cells, r) => {
+    const cs = cells.map((c, i) => {
+      if (c === null || c === undefined || c === "") return "";
+      const cell = typeof c === "object" ? c : { v: c };
+      const ref = colName(i) + (r + 1);
+      const st = cell.s ? ` s="${cell.s}"` : "";
+      return cell.num
+        ? `<c r="${ref}"${st}><v>${num(cell.v)}</v></c>`
+        : `<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${xmlEsc(cell.v)}</t></is></c>`;
+    }).join("");
+    return `<row r="${r + 1}">${cs}</row>`;
+  }).join("");
+  const cols = (opts.widths || []).map((w, i) =>
+    `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("");
+  const merges = (opts.merges || []).length
+    ? `<mergeCells count="${opts.merges.length}">${opts.merges.map(m => `<mergeCell ref="${m}"/>`).join("")}</mergeCells>`
+    : "";
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>
+${cols ? `<cols>${cols}</cols>` : ""}<sheetData>${body}</sheetData>${merges}
+<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/>
+<pageSetup orientation="portrait" fitToWidth="1"/></worksheet>`;
+}
+
+/* style indexes: 1 title, 2 bold, 3 label, 4 header row, 5 number, 6 bold number, 7 wrap */
+const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<numFmts count="1"><numFmt numFmtId="164" formatCode="#,##0.00"/></numFmts>
+<fonts count="5">
+ <font><sz val="10"/><name val="Calibri"/></font>
+ <font><b/><sz val="18"/><name val="Calibri"/></font>
+ <font><b/><sz val="10"/><name val="Calibri"/></font>
+ <font><b/><sz val="9"/><color rgb="FF5C6579"/><name val="Calibri"/></font>
+ <font><b/><sz val="11"/><name val="Calibri"/></font>
+</fonts>
+<fills count="3"><fill><patternFill patternType="none"/></fill>
+ <fill><patternFill patternType="gray125"/></fill>
+ <fill><patternFill patternType="solid"><fgColor rgb="FF1A2744"/><bgColor indexed="64"/></patternFill></fill></fills>
+<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>
+ <border><left style="thin"><color rgb="FFBFC6D2"/></left><right style="thin"><color rgb="FFBFC6D2"/></right>
+ <top style="thin"><color rgb="FFBFC6D2"/></top><bottom style="thin"><color rgb="FFBFC6D2"/></bottom><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="8">
+ <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
+ <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+ <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+ <xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+ <xf numFmtId="0" fontId="4" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1">
+   <alignment horizontal="center"/></xf>
+ <xf numFmtId="164" fontId="0" fillId="0" borderId="1" xfId="0" applyNumberFormat="1" applyBorder="1"/>
+ <xf numFmtId="164" fontId="2" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>
+ <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1"><alignment wrapText="1" vertical="top"/></xf>
+</cellXfs></styleSheet>`;
+
+function buildXlsx(sheetName, rows, opts) {
+  const files = [
+    { name: "[Content_Types].xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
+</Types>` },
+    { name: "_rels/.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>` },
+    { name: "xl/workbook.xml", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="${xmlEsc(sheetName).slice(0,30)}" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+    { name: "xl/_rels/workbook.xml.rels", data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>` },
+    { name: "xl/styles.xml", data: STYLES_XML },
+    { name: "xl/worksheets/sheet1.xml", data: sheetXml(rows, opts) }
+  ];
+  return zipFiles(files);
+}
+
+function saveXlsx(filename, sheetName, rows, opts) {
+  const bytes = buildXlsx(sheetName, rows, opts);
+  if (window.AndroidBridge && window.AndroidBridge.saveBytes) {
+    let bin = "";
+    bytes.forEach(b => { bin += String.fromCharCode(b); });
+    try { AndroidBridge.saveBytes(filename, btoa(bin)); toast("Saved " + filename); return; }
+    catch (e) { /* fall through to a browser download */ }
+  }
+  const blob = new Blob([bytes], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href:url, download:filename });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+/** The official document as a spreadsheet, laid out like the paper form. */
+function documentToXlsx(lines, refNo) {
+  const c = CO(), head = lines[0], ex = docExtras(refNo);
+  const title = (DOC_TITLE[head.type] || head.type).toUpperCase();
+  const isQuote = head.type === "QUOTATION OUT";
+  const party = head.customerId ? byId("customers", head.customerId)
+              : head.supplierId ? byId("suppliers", head.supplierId) : null;
+  const t2 = docTotals(lines, ex);
+  const cur = txCurrency(head);
+  const B = v => ({ v, s:2 });
+  const L = v => ({ v, s:3 });
+  const H = v => ({ v, s:4 });
+  const N = v => ({ v, s:5, num:true });
+
+  const rows = [];
+  rows.push([B(c.name), "", "", "", "", "", { v:title, s:1 }]);
+  rows.push([c.addressLine || c.address || "", "", "", "", "", L(`${title} #`), refNo]);
+  rows.push([`Mobile: ${c.phone || ""}${c.phone2 ? " - " + c.phone2 : ""}`, "", "", "", "", L("DATE"), head.date]);
+  rows.push([c.email || "", "", "", "", "", L("CURRENCY"), cur]);
+  rows.push([]);
+  rows.push([L("BILL TO"), "", "", "", "", L("CUSTOMER ID"), ex.customerRef || (party ? party.id : "")]);
+  rows.push([party ? party.contact || "" : "", "", "", "", "", L("TERMS"), ex.terms || c.terms || ""]);
+  rows.push([party ? party.nameEn : "", "", "", "", "",
+             isQuote ? "" : L("PO NO"), isQuote ? "" : (ex.poNo || "NA")]);
+  rows.push([party ? party.address || "" : ""]);
+  rows.push([party ? party.phone || "" : ""]);
+  if (!isQuote && c.payVia) {
+    rows.push([]);
+    rows.push([L("PAYMENT VIA")]);
+    String(c.payVia).split("\n").forEach(line => rows.push([line]));
+  }
+  rows.push([]);
+  rows.push([H("SN"), H("DESCRIPTION"), H("UNIT"), H("QTY"), H("UNIT PRICE"), H("DISCOUNT"), H("AMOUNT")]);
+  lines.forEach((x, i) => {
+    const it = byId("items", x.itemId);
+    rows.push([{ v:i + 1, s:7 }, { v:it ? it.nameEn : (x.notes || x.type), s:7 },
+               { v:it ? it.unit || "" : "", s:7 },
+               N(x.qty || ""), N(x.unitPrice || ""), N(x.discount || ""), N(amountOf(x))]);
+  });
+  rows.push([]);
+  const totalRow = (label, value) => rows.push(["", "", "", "", B(label), "", { v:value, s:6, num:true }]);
+  totalRow("SUBTOTAL", t2.subtotal);
+  if (t2.discount) totalRow("DISCOUNT", t2.discount);
+  if (t2.rate) totalRow(`VAT @ ${t2.rate}%`, t2.vat);
+  else rows.push(["", "", "", "", B("TAX RATE"), "", "not involved"]);
+  if (t2.shipping) totalRow("SHIPPING COST", t2.shipping);
+  totalRow(`TOTAL ${cur}`, t2.total);
+  rows.push([]);
+  if (isQuote && (ex.validity || c.validity)) rows.push([ex.validity || c.validity]);
+  if (ex.delivery || c.delivery) rows.push([ex.delivery || c.delivery]);
+  if (ex.note) rows.push([ex.note]);
+  rows.push([]);
+  rows.push([L("Prepared by"), "", L("Approved by"), "", L("Received by / stamp")]);
+  rows.push([head.createdBy || ""]);
+  rows.push([]);
+  rows.push([B(c.footer || c.name)]);
+
+  saveXlsx(`${refNo || title}.xlsx`, title.slice(0, 28), rows,
+    { widths:[6, 40, 8, 10, 14, 12, 14] });
+}
+
+/* ---- fixed asset register & depreciation ---- */
+
+function repAssets(m) {
+  const all = rowsOf("assets");
+  if (!all.length) {
+    m.appendChild(el("div", { class:"card" }, `<div class="empty">
+      No assets yet. Add the ones you already own under Master data → Fixed assets,
+      or tick "Is this a fixed asset?" when entering a purchase.</div>`));
+    return;
+  }
+  const list = rep.entity ? all.filter(a => a.id === rep.entity) : all;
+  const upto = rep.to || today();
+
+  const totals = list.reduce((s,a) => ({
+    cost:s.cost + num(a.cost),
+    period:s.period + depnInPeriod(a, rep.from, upto),
+    accum:s.accum + accumDepn(a, upto),
+    nbv:s.nbv + netBookValue(a, upto)
+  }), { cost:0, period:0, accum:0, nbv:0 });
+
+  const kpis = el("div", { class:"kpis" });
+  const kpi = (k,v,n) => kpis.appendChild(el("div", { class:"kpi" },
+    `<div class="k">${esc(k)}</div><div class="v">${esc(v)}</div><div class="n">${esc(n)}</div>`));
+  kpi("Acquisition cost", fmt0(totals.cost), `${list.length} assets`);
+  kpi("Depreciation this period", fmt0(totals.period), `${rep.from || "start"} → ${upto}`);
+  kpi("Accumulated depreciation", fmt0(totals.accum), "to " + upto);
+  kpi("Net book value", fmt0(totals.nbv), "cost − accumulated");
+  m.appendChild(kpis);
+
+  const w = el("div", { class:"tablewrap" });
+  w.style.marginTop = "1rem";
+  w.innerHTML = `<table><thead><tr>
+    <th>Tag</th><th>Asset</th><th>Category</th><th>Location</th><th>Custodian</th>
+    <th>Acquired</th><th>Source</th><th class="num">Cost</th><th class="num">Life</th>
+    <th class="num">Depn. period</th><th class="num">Accumulated</th><th class="num">Net book value</th>
+    <th>Status</th></tr></thead><tbody>${
+    list.map(a => `<tr>
+      <td>${esc(a.tag || a.id)}</td><td>${esc(a.nameEn)}</td><td>${esc(a.category || "")}</td>
+      <td>${esc(a.location || "")}</td><td>${esc(nameOf("employees", a.custodianId))}</td>
+      <td>${esc(a.acquiredOn || "")}</td><td>${esc(a.source || "")}</td>
+      <td class="num">${fmt(a.cost)}</td><td class="num">${a.lifeYears ? a.lifeYears + "y" : "—"}</td>
+      <td class="num">${fmt(depnInPeriod(a, rep.from, upto))}</td>
+      <td class="num">${fmt(accumDepn(a, upto))}</td>
+      <td class="num">${fmt(netBookValue(a, upto))}</td>
+      <td><span class="pill ${assetLive(a) ? "approved" : "closed"}">${esc(a.status || "")}</span></td>
+    </tr>`).join("")}</tbody>
+    <tfoot><tr><td colspan="7">${esc(t("total"))}</td>
+      <td class="num">${fmt(totals.cost)}</td><td></td>
+      <td class="num">${fmt(totals.period)}</td><td class="num">${fmt(totals.accum)}</td>
+      <td class="num">${fmt(totals.nbv)}</td><td></td></tr></tfoot></table>`;
+  m.appendChild(w);
+
+  /* by category */
+  const cats = [...new Set(list.map(a => a.category || "Other"))].sort();
+  const c = el("div", { class:"card" });
+  c.appendChild(el("h2", {}, "By category"));
+  const cw = el("div", { class:"tablewrap" });
+  cw.innerHTML = `<table><thead><tr><th>Category</th><th class="num">Count</th>
+    <th class="num">Cost</th><th class="num">Net book value</th></tr></thead><tbody>${
+    cats.map(cat => {
+      const g = list.filter(a => (a.category || "Other") === cat);
+      return `<tr><td>${esc(cat)}</td><td class="num">${g.length}</td>
+        <td class="num">${fmt(g.reduce((s,a) => s + num(a.cost), 0))}</td>
+        <td class="num">${fmt(g.reduce((s,a) => s + netBookValue(a, upto), 0))}</td></tr>`;
+    }).join("")}</tbody></table>`;
+  c.appendChild(cw);
+  m.appendChild(c);
+
+  c.appendChild(el("p", { class:"card-note", style:"margin-top:.7rem" },
+    "Straight line: (cost − residual) ÷ useful life, charged monthly from the acquisition date " +
+    "and stopping at disposal. Assets with no useful life are held at cost."));
+}
+
+/* ---- products & services ---- */
+
+const soldTypes   = ["INVOICE OUT","QUOTATION OUT","PO IN"];
+const boughtTypes = ["INVOICE IN","QUOTATION IN","PO OUT"];
+
+function repItems(m) {
+  const list = rep.entity ? [byId("items", rep.entity)].filter(Boolean) : rowsOf("items");
+  if (!list.length) {
+    m.appendChild(el("div", { class:"card" }, `<div class="empty">
+      No products or services yet. Add them under Master data → Products &amp; services,
+      then choose one on each quotation, purchase or invoice line.</div>`));
+    return;
+  }
+  const period = txs({ from:rep.from, to:rep.to });
+  const rows = list.map(it => {
+    const mine = period.filter(x => x.itemId === it.id);
+    const sold   = mine.filter(x => x.type === "INVOICE OUT");
+    const bought = mine.filter(x => x.type === "INVOICE IN");
+    const quoted = mine.filter(x => x.type === "QUOTATION OUT");
+    // quantities and values are net of what came back
+    const backIn  = mine.filter(isSalesReturn);
+    const backOut = mine.filter(isPurchaseReturn);
+    const qSold   = sum(sold, x => x.qty) - sum(backIn, x => x.qty);
+    const qBought = sum(bought, x => x.qty) - sum(backOut, x => x.qty);
+    const rev  = sum(sold, amountOf) - sum(backIn, amountOf);
+    const cost = sum(bought, amountOf) - sum(backOut, amountOf);
+    return { it, quoted:quoted.length, qSold, qBought, rev, cost,
+             avg: qSold ? rev / qSold : 0, profit: rev - cost };
+  });
+  const w = el("div", { class:"tablewrap" });
+  w.innerHTML = `<table><thead><tr>
+    <th>Code</th><th>Description</th><th>Type</th><th>Unit</th>
+    <th class="num">Quoted</th><th class="num">Qty sold</th><th class="num">Sales value</th>
+    <th class="num">Avg price</th><th class="num">Qty bought</th><th class="num">Purchase value</th>
+    <th class="num">Margin</th></tr></thead><tbody>${
+    rows.map(r => `<tr>
+      <td>${esc(r.it.code || "")}</td><td>${esc(r.it.nameEn)}</td>
+      <td>${esc(r.it.kind || "")}</td><td>${esc(r.it.unit || "")}</td>
+      <td class="num">${r.quoted || ""}</td>
+      <td class="num">${r.qSold ? fmt(r.qSold) : ""}</td><td class="num">${fmt(r.rev)}</td>
+      <td class="num">${r.avg ? fmt(r.avg) : ""}</td>
+      <td class="num">${r.qBought ? fmt(r.qBought) : ""}</td><td class="num">${fmt(r.cost)}</td>
+      <td class="num">${fmt(r.profit)}</td></tr>`).join("")
+    }</tbody><tfoot><tr><td colspan="6">${esc(t("total"))}</td>
+      <td class="num">${fmt(rows.reduce((s,r) => s + r.rev, 0))}</td><td></td><td></td>
+      <td class="num">${fmt(rows.reduce((s,r) => s + r.cost, 0))}</td>
+      <td class="num">${fmt(rows.reduce((s,r) => s + r.profit, 0))}</td></tr></tfoot></table>`;
+  m.appendChild(w);
+
+  /* movement detail for a single selected item */
+  if (rep.entity) {
+    const it = list[0];
+    const mine = period.filter(x => x.itemId === it.id);
+    const card = el("div", { class:"card" });
+    card.appendChild(el("h2", {}, "Movement — " + esc(it.nameEn)));
+    const d = el("div", { class:"tablewrap" });
+    d.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
+      <th>Party</th><th>${esc(t("ref"))}</th><th class="num">Qty</th>
+      <th class="num">Unit price</th><th class="num">${esc(t("amount"))}</th></tr></thead><tbody>${
+      mine.map(x => `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}</td>
+        <td>${esc(nameOf("customers",x.customerId) || nameOf("suppliers",x.supplierId) || "")}</td>
+        <td>${esc(x.refNo || "")}</td><td class="num">${x.qty ? fmt(x.qty) : ""}</td>
+        <td class="num">${x.unitPrice ? fmt(x.unitPrice) : ""}</td>
+        <td class="num">${fmt(amountOf(x))}</td></tr>`).join("") ||
+      `<tr><td colspan="7" class="empty">${esc(t("none"))}</td></tr>`}</tbody></table>`;
+    card.appendChild(d);
+    m.appendChild(card);
+  }
+}
+
+/* ---- official documents ---- */
+
+const DOC_TITLE = {
+  "QUOTATION OUT":"Quotation", "INVOICE OUT":"Tax Invoice", "PO OUT":"Purchase Order",
+  "SALES RETURN":"Credit Note", "PURCHASE RETURN":"Debit Note",
+  "REFUND TO CUSTOMER":"Refund Voucher", "REFUND FROM SUPPLIER":"Refund Received",
+  "RFQ OUT":"Request for Quotation", "INVOICE IN":"Supplier Invoice",
+  "QUOTATION IN":"Supplier Quotation", "PO IN":"Customer Purchase Order",
+  "RECEIPT":"Receipt Voucher", "PAYMENT OUT":"Payment Voucher"
+};
+
+function repDocuments(m) {
+  // documents are the rows that share one reference number
+  const groups = {};
+  txs({ from:rep.from, to:rep.to }).forEach(x => {
+    if (!x.refNo) return;
+    (groups[x.refNo] = groups[x.refNo] || []).push(x);
+  });
+  const keys = Object.keys(groups).sort();
+  if (!keys.length) {
+    m.appendChild(el("div", { class:"card" }, `<div class="empty">
+      No documents yet. Give each quotation, order or invoice a reference number on
+      the daily entry screen — every line sharing that number becomes one document.</div>`));
+    return;
+  }
+  const pick = el("div", { class:"toolbar noprint" });
+  pick.appendChild(fld("Document | المستند", `<select id="docSel">${keys.map(k => {
+    const g = groups[k];
+    return `<option value="${esc(k)}" ${k === rep.doc ? "selected" : ""}>${esc(k)} — ${
+      esc(DOC_TITLE[g[0].type] || g[0].type)} · ${esc(g[0].date)}</option>`;
+  }).join("")}</select>`));
+  const btn = el("button", { class:"btn sm" }, "Open");
+  btn.onclick = () => { rep.doc = $("#docSel").value; render(); };
+  pick.appendChild(btn);
+  m.appendChild(pick);
+
+  const key = rep.doc && groups[rep.doc] ? rep.doc : keys[0];
+  const lines = groups[key];
+
+  const bar = el("div", { class:"toolbar noprint", style:"margin-bottom:.8rem" });
+  const bPrint = el("button", { class:"btn gold sm" }, "Print / PDF");
+  bPrint.onclick = () => doPrint(key);
+  const bXls = el("button", { class:"btn sm" }, "Download Excel");
+  bXls.onclick = () => documentToXlsx(lines, key);
+  const bEdit = el("button", { class:"btn ghost sm" }, "Document details");
+  bEdit.onclick = () => editDocExtras(key);
+  if (!canEdit()) bEdit.setAttribute("disabled", "");
+  [bPrint, bXls, bEdit].forEach(b => bar.appendChild(b));
+  m.appendChild(bar);
+
+  m.appendChild(officialDoc(lines, key));
+}
+
+/** Terms, PO number, discount, tax and shipping belong to the document, not to
+    any one line, so they are edited here and printed on both the PDF and Excel. */
+function editDocExtras(ref) {
+  const ex = docExtras(ref), c = CO();
+  modal(`Document details — ${ref}`, [
+    { k:"customerRef", l:"Customer ID as printed", v:ex.customerRef },
+    { k:"terms", l:"Terms", v:ex.terms || c.terms },
+    { k:"poNo", l:"PO number", v:ex.poNo },
+    { k:"discount", l:"Discount on the whole document", t:"number", v:ex.discount },
+    { k:"taxRate", l:"VAT rate % (blank = not involved)", t:"number", v:ex.taxRate },
+    { k:"shipping", l:"Shipping cost", t:"number", v:ex.shipping },
+    { k:"validity", l:"Validity note", v:ex.validity || c.validity },
+    { k:"delivery", l:"Delivery note", v:ex.delivery || c.delivery },
+    { k:"note", l:"Extra note", t:"textarea", v:ex.note }
+  ], vals => { saveDocExtras(ref, vals); render(); toast("Document details saved"); });
+}
+
+/** Per-document extras that are not part of any single line. */
+const docExtras = ref => Object.assign(
+  { terms:"", poNo:"", customerRef:"", validity:"", delivery:"",
+    discount:0, shipping:0, taxRate:"", note:"" },
+  (DB.meta.docs || {})[ref] || {});
+
+function saveDocExtras(ref, vals) {
+  DB.meta.docs = DB.meta.docs || {};
+  DB.meta.docs[ref] = Object.assign(docExtras(ref), vals);
+  save();
+}
+
+/** Subtotal, discount, tax, shipping and total, exactly as the paper form adds up. */
+function docTotals(lines, ex) {
+  const subtotal = sum(lines, amountOf);
+  const discount = num(ex.discount);
+  const taxable  = subtotal - discount;
+  const rate     = num(ex.taxRate);
+  const vat      = rate > 0 ? taxable * rate / 100 : 0;
+  const shipping = num(ex.shipping);
+  return { subtotal, discount, taxable, rate, vat, shipping, total: taxable + vat + shipping };
+}
+
+function officialDoc(lines, refNo) {
+  const c = CO(), head = lines[0], ex = docExtras(refNo);
+  const title = DOC_TITLE[head.type] || head.type;
+  const isQuote = head.type === "QUOTATION OUT";
+  const party = head.customerId ? byId("customers", head.customerId)
+              : head.supplierId ? byId("suppliers", head.supplierId) : null;
+  const proj = byId("projects", (lines.find(x => x.projectId) || {}).projectId);
+  const t2 = docTotals(lines, ex);
+  const cur = txCurrency(head);
+
+  const box = el("div", { class:"doc" });
+  box.innerHTML = `
+    ${letterhead(title, `No. ${esc(refNo)}`)}
+
+    <div class="doc-meta">
+      <div><h3>Bill to</h3>
+        ${party ? `<p><b>${esc(party.contact || "")}</b></p>
+                   <p><b>${esc(party.nameEn)}</b></p>
+                   ${party.nameAr ? `<p>${esc(party.nameAr)}</p>` : ""}
+                   ${party.address ? `<p>${esc(party.address)}</p>` : ""}
+                   ${party.phone ? `<p>${esc(party.phone)}</p>` : ""}` : `<p>—</p>`}
+      </div>
+      <div><h3>${esc(title)}</h3>
+        <p>Number: <b>${esc(refNo)}</b></p>
+        <p>Date: ${esc(head.date)}</p>
+        <p>Currency: ${esc(cur)}</p>
+        ${proj ? `<p>Project: ${esc(proj.nameEn)}</p>` : ""}
+      </div>
+      <div><h3>${isQuote ? "Terms" : "Terms & order"}</h3>
+        <p>Customer ID: ${esc(ex.customerRef || (party ? party.id : "—"))}</p>
+        <p>Terms: ${esc(ex.terms || c.terms || "—")}</p>
+        ${!isQuote ? `<p>PO No: ${esc(ex.poNo || "NA")}</p>` : ""}
+        ${head.caseNo ? `<p>Case: ${esc(head.caseNo)}</p>` : ""}
+      </div>
+    </div>
+
+    ${!isQuote && c.payVia ? `<div class="doc-pay"><h3>Payment via</h3>
+      <p>${esc(c.payVia).replace(/\n/g, "<br>")}</p></div>` : ""}
+
+    <div class="tablewrap"><table><thead><tr>
+      <th>SN</th><th>Description</th><th>Unit</th>
+      <th class="num">Qty</th><th class="num">Unit price</th>
+      <th class="num">Discount</th><th class="num">Amount</th>
+    </tr></thead><tbody>${lines.map((x, i) => {
+      const it = byId("items", x.itemId);
+      return `<tr><td>${i + 1}</td>
+        <td>${esc(it ? it.nameEn : (x.notes || x.type))}${
+          it && it.nameAr ? `<br><small>${esc(it.nameAr)}</small>` : ""}</td>
+        <td>${esc(it ? it.unit || "" : "")}</td>
+        <td class="num">${x.qty ? fmt(x.qty) : ""}</td>
+        <td class="num">${x.unitPrice ? fmt(x.unitPrice) : ""}</td>
+        <td class="num">${num(x.discount) ? fmt(x.discount) : ""}</td>
+        <td class="num">${fmt(amountOf(x))}</td></tr>`;
+    }).join("")}</tbody></table></div>
+
+    <table class="totals"><tbody>
+      <tr><td>Subtotal</td><td class="num">${fmt(t2.subtotal)}</td></tr>
+      ${t2.discount ? `<tr><td>Discount</td><td class="num">${fmt(t2.discount)}</td></tr>` : ""}
+      ${t2.rate ? `<tr><td>VAT @ ${esc(t2.rate)}%</td><td class="num">${fmt(t2.vat)}</td></tr>`
+                : `<tr><td>Tax rate</td><td class="num">not involved</td></tr>`}
+      ${t2.shipping ? `<tr><td>Shipping cost</td><td class="num">${fmt(t2.shipping)}</td></tr>` : ""}
+      <tr><td>Total ${esc(cur)}</td><td class="num">${fmt(t2.total)}</td></tr>
+    </tbody></table>
+
+    <div class="doc-note">
+      ${isQuote && (ex.validity || c.validity) ? `<p>${esc(ex.validity || c.validity)}</p>` : ""}
+      ${ex.delivery || c.delivery ? `<p>${esc(ex.delivery || c.delivery)}</p>` : ""}
+      ${ex.note ? `<p>${esc(ex.note)}</p>` : ""}
+      ${head.notes ? `<p>${esc(head.notes)}</p>` : ""}
+    </div>
+
+    <div class="doc-foot">
+      <div class="sign">Prepared by${head.createdBy ? " — " + esc(head.createdBy) : ""}</div>
+      <div class="sign">Approved by</div>
+      <div class="sign">Received by / stamp</div>
+    </div>
+    <div class="doc-note" style="text-align:center">${esc(c.footer || c.name)}</div>`;
+  return box;
+}
+
+function repSummary(m) {
+  const list = txs({ from:rep.from, to:rep.to });
+  const revenue = netRevenue(list);
+  const cost = netCost(list);
+  const salesReturns = sum(list.filter(isSalesReturn), amountOf);
+  const purchaseReturns = sum(list.filter(isPurchaseReturn), amountOf);
+  const capex = sum(list.filter(isCapital), amountOf);
+  const depn = periodDepn(rep.from, rep.to || today());
+  const cin = sum(list.filter(isCashIn), amountOf), cout = sum(list.filter(isCashOut), amountOf);
+  // quotations and orders carry a value but are not money yet
+  const money = list.filter(x => typeOf(x.type).fin);
+  const card = el("div", { class:"card" });
+  card.innerHTML = `<h2>Period result${esc(curSuffix())}</h2>
+    <div class="tablewrap"><table><tbody>
+      <tr><td>Revenue — customer invoices, net of returns</td><td class="num">${fmt(revenue)}</td></tr>
+      <tr><td>&nbsp;&nbsp;of which returned by customers</td><td class="num">${fmt(salesReturns)}</td></tr>
+      <tr><td>Cost — supplier bills, expenses, salaries, net of returns</td><td class="num">${fmt(cost)}</td></tr>
+      <tr><td>&nbsp;&nbsp;of which returned to suppliers</td><td class="num">${fmt(purchaseReturns)}</td></tr>
+      <tr><td>Depreciation of fixed assets</td><td class="num">${fmt(depn)}</td></tr>
+      <tr><td><b>Net profit</b></td><td class="num"><b>${fmt(revenue - cost - depn)}</b></td></tr>
+      <tr><td>Capital spending on assets (not a cost)</td><td class="num">${fmt(capex)}</td></tr>
+      <tr><td>Fixed assets at net book value</td><td class="num">${fmt(totalNBV(rep.to))}</td></tr>
+      <tr><td>Guarantees & deposits held with others</td><td class="num">${fmt(depositsHeld(rep.to))}</td></tr>
+      <tr><td>Owner drawings</td><td class="num">${fmt(sum(list.filter(x => x.type === "OWNER DRAWINGS"), amountOf))}</td></tr>
+      <tr><td>Cash received</td><td class="num">${fmt(cin)}</td></tr>
+      <tr><td>Cash paid</td><td class="num">${fmt(cout)}</td></tr>
+      <tr><td><b>Net cash movement</b></td><td class="num"><b>${fmt(cin - cout)}</b></td></tr>
+      <tr><td>Total ${esc(t("debit"))}</td><td class="num">${fmt(sum(money, x => x.debit))}</td></tr>
+      <tr><td>Total ${esc(t("credit"))}</td><td class="num">${fmt(sum(money, x => x.credit))}</td></tr>
+      <tr><td><b>Balance (Debit − Credit)</b></td><td class="num"><b>${fmt(
+        sum(money, x => x.debit) - sum(money, x => x.credit))}</b></td></tr>
+    </tbody></table></div>`;
+  m.appendChild(card);
+
+  const acc = el("div", { class:"card" });
+  acc.appendChild(el("h2", {}, "Balances by account"));
+  const w = el("div", { class:"tablewrap" });
+  w.innerHTML = `<table><thead><tr><th>Account</th><th>Type</th><th>Currency</th><th class="num">${
+    esc(t("balance"))}</th></tr></thead><tbody>${curAccounts().map(a =>
+    `<tr><td>${esc(a.nameEn)}</td><td>${esc(a.kind || "")}</td><td>${esc(a.currency || "")}</td>
+      <td class="num">${fmt(accountBalance(a.id, rep.to))}</td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="3">${esc(t("total"))}${esc(curSuffix())}</td>
+      <td class="num">${fmt(curAccounts().reduce((s,a) => s + accountBalance(a.id, rep.to), 0))}</td>
+    </tr></tfoot></table>`;
+  acc.appendChild(w);
+  m.appendChild(acc);
+}
+
+function repParty(m, tbl) {
+  const isCus = tbl === "customers";
+  const list = rep.entity ? [byId(tbl, rep.entity)].filter(Boolean) : rowsOf(tbl);
+  if (!list.length) { m.appendChild(el("div", { class:"card" }, `<div class="empty">${esc(t("none"))}</div>`)); return; }
+  list.forEach(p => {
+    const key = isCus ? "customerId" : "supplierId";
+    const all = txs({ [key]:p.id });
+    const before = all.filter(x => rep.from && x.date < rep.from);
+    // charges raise the balance, settlements lower it; a return is a settlement,
+    // a refund undoes one
+    const charge  = x => isCus ? (isRevenue(x) || isRefundOut(x)) : (isBilled(x) || isRefundIn(x));
+    const settle  = x => isCus ? (isCashIn(x) || isSalesReturn(x)) : (isCashOut(x) || isPurchaseReturn(x));
+    const relevant = x => charge(x) || settle(x);
+    const opening = num(p.opening) +
+      sum(before.filter(charge), amountOf) - sum(before.filter(settle), amountOf);
+    const period = all.filter(x => inRange(x, rep.from, rep.to)).filter(relevant);
+    let run = opening;
+    const body = period.map(x => {
+      const up = charge(x);
+      const amt = amountOf(x);
+      run += up ? amt : -amt;
+      const ret = isSalesReturn(x) || isPurchaseReturn(x);
+      return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}${
+          ret && x.againstRef ? ` <small>vs ${esc(x.againstRef)}</small>` : ""}</td>
+        <td>${esc(x.refNo || "")}</td>
+        <td>${esc(x.caseNo || "")}</td>
+        <td class="num">${up ? fmt(amt) : ""}</td><td class="num">${up ? "" : fmt(amt)}</td>
+        <td class="num">${fmt(run)}</td></tr>`;
+    }).join("");
+    const card = el("div", { class:"card" });
+    card.appendChild(el("h2", {}, esc(p.nameEn) + (p.nameAr ? " — " + p.nameAr : "")));
+    card.appendChild(el("div", { class:"card-note" },
+      `${esc(p.phone || "")} ${esc(p.email || "")} · ${esc(t("opening"))}: ${fmt(opening)}`));
+    const w = el("div", { class:"tablewrap" }); w.style.marginTop = ".6rem";
+    w.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
+      <th>${esc(t("ref"))}</th><th>Case</th>
+      <th class="num">${isCus ? "Invoiced" : "Billed"}</th>
+      <th class="num">${isCus ? "Received / returned" : "Paid / returned"}</th>
+      <th class="num">${esc(t("balance"))}</th></tr></thead>
+      <tbody><tr><td colspan="6">${esc(t("opening"))}</td><td class="num">${fmt(opening)}</td></tr>
+      ${body || ""}</tbody>
+      <tfoot><tr><td colspan="4">${esc(t("closing"))}</td>
+        <td class="num">${fmt(sum(period.filter(charge), amountOf))}</td>
+        <td class="num">${fmt(sum(period.filter(settle), amountOf))}</td>
+        <td class="num">${fmt(run)}</td></tr></tfoot></table>`;
+    card.appendChild(w);
+    m.appendChild(card);
+  });
+}
+
+function repProject(m) {
+  const list = rep.entity ? [byId("projects", rep.entity)].filter(Boolean) : rowsOf("projects");
+  const w = el("div", { class:"tablewrap" });
+  if (!list.length) { w.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; m.appendChild(w); return; }
+  const rows = list.map(p => {
+    const l = txs({ projectId:p.id, from:rep.from, to:rep.to });
+    const rev = netRevenue(l), cst = netCost(l);
+    const margin = rev ? ((rev - cst) / rev * 100) : 0;
+    return `<tr><td>${esc(p.nameEn)}</td><td>${esc(nameOf("customers", p.customerId))}</td>
+      <td>${esc(p.status || "")}</td><td class="num">${fmt(p.budget)}</td>
+      <td class="num">${fmt(rev)}</td><td class="num">${fmt(cst)}</td>
+      <td class="num">${fmt(rev - cst)}</td><td class="num">${margin.toFixed(1)}%</td></tr>`;
+  }).join("");
+  w.innerHTML = `<table><thead><tr><th>Project</th><th>Customer</th><th>Status</th>
+    <th class="num">Contract</th><th class="num">Revenue</th><th class="num">Cost</th>
+    <th class="num">Profit</th><th class="num">Margin</th></tr></thead><tbody>${rows}</tbody></table>`;
+  m.appendChild(w);
+}
+
+function repEmployee(m) {
+  const list = rep.entity ? [byId("employees", rep.entity)].filter(Boolean) : rowsOf("employees");
+  const w = el("div", { class:"tablewrap" });
+  if (!list.length) { w.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; m.appendChild(w); return; }
+  const rows = list.map(e => {
+    const l = txs({ employeeId:e.id, from:rep.from, to:rep.to });
+    const sal = sum(l.filter(x => x.type === "SALARY"), amountOf);
+    const adv = sum(l.filter(x => x.type === "ADVANCE TO EMPLOYEE"), amountOf);
+    return `<tr><td>${esc(e.nameEn)}</td><td>${esc(e.position || "")}</td>
+      <td class="num">${fmt(e.salary)}</td><td class="num">${fmt(sal)}</td>
+      <td class="num">${fmt(adv)}</td><td class="num">${fmt(sal - adv)}</td></tr>`;
+  }).join("");
+  w.innerHTML = `<table><thead><tr><th>Employee</th><th>Position</th><th class="num">Monthly salary</th>
+    <th class="num">Salaries paid</th><th class="num">Advances</th><th class="num">Net</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+  m.appendChild(w);
+}
+
+function repBank(m) {
+  const list = rep.entity ? [byId("accounts", rep.entity)].filter(Boolean) : curAccounts();
+  list.forEach(a => {
+    const all = txs({ accountId:a.id });
+    const before = all.filter(x => rep.from && x.date < rep.from);
+    const opening = num(a.opening) + sum(before.filter(isCashIn), amountOf) - sum(before.filter(isCashOut), amountOf);
+    const period = all.filter(x => inRange(x, rep.from, rep.to)).filter(x => isCashIn(x) || isCashOut(x));
+    let run = opening;
+    const body = period.map(x => {
+      const inn = isCashIn(x), amt = amountOf(x);
+      run += inn ? amt : -amt;
+      return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}</td><td>${esc(x.refNo || "")}</td>
+        <td>${esc(nameOf("customers",x.customerId) || nameOf("suppliers",x.supplierId) || nameOf("employees",x.employeeId) || "")}</td>
+        <td class="num">${inn ? fmt(amt) : ""}</td><td class="num">${inn ? "" : fmt(amt)}</td>
+        <td class="num">${fmt(run)}</td></tr>`;
+    }).join("");
+    const card = el("div", { class:"card" });
+    card.appendChild(el("h2", {}, esc(a.nameEn) + " — " + esc(a.kind || "") + (a.bank && a.bank !== "—" ? " · " + esc(a.bank) : "")));
+    const w = el("div", { class:"tablewrap" });
+    w.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
+      <th>${esc(t("ref"))}</th><th>Party</th><th class="num">In</th><th class="num">Out</th>
+      <th class="num">${esc(t("balance"))}</th></tr></thead>
+      <tbody><tr><td colspan="6">${esc(t("opening"))}</td><td class="num">${fmt(opening)}</td></tr>${body}</tbody>
+      <tfoot><tr><td colspan="4">${esc(t("closing"))}</td>
+        <td class="num">${fmt(sum(period.filter(isCashIn), amountOf))}</td>
+        <td class="num">${fmt(sum(period.filter(isCashOut), amountOf))}</td>
+        <td class="num">${fmt(run)}</td></tr></tfoot></table>`;
+    card.appendChild(w);
+    m.appendChild(card);
+  });
+}
+
+/* =========================================================================
+   Backup, restore, merge-sync
+   ========================================================================= */
+
+/* =========================================================================
+   Company profile — the letterhead on every report and document
+   ========================================================================= */
+
+const CO_FIELDS = [
+  { k:"name",     l:"Legal name (English)" },
+  { k:"nameAr",   l:"Legal name (Arabic)" },
+  { k:"activity", l:"Business activity line" },
+  { k:"address",  l:"Address" },
+  { k:"country",  l:"City / country" },
+  { k:"phone",    l:"Phone" },
+  { k:"phone2",   l:"Second phone" },
+  { k:"email",    l:"Email" },
+  { k:"web",      l:"Website" },
+  { k:"taxNo",    l:"Tax number" },
+  { k:"regNo",    l:"Commercial registration number" },
+  { k:"currency", l:"Default currency" },
+  { k:"addressLine", l:"Address line as printed", },
+  { k:"terms", l:"Default terms" },
+  { k:"validity", l:"Default quotation validity" },
+  { k:"delivery", l:"Default delivery note" },
+  { k:"vatRate", l:"Default VAT %" }
+];
+const CO_TEXTAREAS = [
+  { k:"payVia", l:"PAYMENT VIA — bank details printed on invoices" },
+  { k:"footer", l:"Footer line" }
+];
+
+function viewCompany(m) {
+  if (!isAdmin()) {
+    m.appendChild(el("div", { class:"card" },
+      `<div class="empty">Only an Administrator can change the company profile.</div>`));
+    return;
+  }
+  pageHead(m, t("company"), "Printed at the head of every report and document");
+  const c = CO();
+  const card = el("div", { class:"card" });
+  const form = el("form");
+  const g = el("div", { class:"grid" });
+  CO_FIELDS.forEach(f => g.appendChild(fld(f.l, `<input name="${f.k}" value="${esc(c[f.k] || "")}">`)));
+  form.appendChild(g);
+  CO_TEXTAREAS.forEach(f => form.appendChild(fld(f.l,
+    `<textarea name="${f.k}" rows="3">${esc(c[f.k] || "")}</textarea>`)));
+
+  const logoRow = el("div", { style:"display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;margin-top:1rem" });
+  logoRow.innerHTML = c.logo
+    ? `<img src="${c.logo}" alt="Company logo" style="height:64px;background:#fff;padding:.3rem;border:1px solid var(--line);border-radius:3px">`
+    : `<span class="card-note">No logo set.</span>`;
+  const pick = el("button", { class:"btn ghost sm", type:"button" }, "Replace logo");
+  pick.onclick = () => {
+    const inp = el("input", { type:"file", accept:"image/*" });
+    inp.onchange = () => {
+      const f = inp.files[0]; if (!f) return;
+      if (f.size > 400000) return toast("Please use an image under 400 KB.");
+      const rd = new FileReader();
+      rd.onload = () => {
+        DB.meta.company = Object.assign({}, DB.meta.company, { logo:String(rd.result) });
+        save(); applyChrome(); render(); toast("Logo updated");
+      };
+      rd.readAsDataURL(f);
+    };
+    inp.click();
+  };
+  logoRow.appendChild(pick);
+  form.appendChild(logoRow);
+
+  const btn = el("button", { class:"btn gold", type:"submit", style:"margin-top:1rem" }, t("save"));
+  form.appendChild(btn);
+  form.onsubmit = e => {
+    e.preventDefault();
+    const vals = Object.fromEntries(new FormData(form).entries());
+    DB.meta.company = Object.assign({}, DB.meta.company, vals);
+    save(); applyChrome(); render(); toast("Company profile saved");
+  };
+  card.appendChild(form);
+  m.appendChild(card);
+
+  const prev = el("div", { class:"card" });
+  prev.appendChild(el("h2", {}, "Letterhead preview"));
+  const box = el("div", { class:"doc" });
+  box.innerHTML = letterhead("Quotation", "No. QT-0001");
+  prev.appendChild(box);
+  m.appendChild(prev);
+}
+
+function viewData(m) {
+  pageHead(m, t("data"), "Move data between the phones and computers of your 5 users");
+
+  const c1 = el("div", { class:"card" });
+  c1.innerHTML = `<h2>Backup</h2><p class="card-note">Writes one file containing every record.
+    Keep it in Drive, OneDrive or WhatsApp so nothing is lost if a phone is replaced.</p>`;
+  const b1 = el("button", { class:"btn gold" }, "Download backup file");
+  b1.onclick = () => saveFile(`environmsafe-backup-${today()}.json`, JSON.stringify(DB, null, 1));
+  c1.appendChild(b1);
+  m.appendChild(c1);
+
+  const c2 = el("div", { class:"card" });
+  c2.innerHTML = `<h2>Restore / merge</h2><p class="card-note">
+    <b>Merge</b> adds records from another user's backup and keeps the newest version of anything edited
+    on both sides — this is how the 5 users stay in step today.
+    <b>Replace</b> throws away what is on this device first.</p>`;
+  const mkImport = (mode, label, cls) => {
+    const b = el("button", { class:"btn " + cls, style:"margin-inline-end:.5rem" }, label);
+    b.onclick = () => {
+      if (!canEdit()) return toast("Your role is read-only.");
+      const inp = el("input", { type:"file", accept:".json,application/json" });
+      inp.onchange = () => {
+        const f = inp.files[0]; if (!f) return;
+        const rd = new FileReader();
+        rd.onload = () => {
+          let incoming;
+          try { incoming = JSON.parse(String(rd.result)); }
+          catch (e) { return toast("That is not a valid backup file."); }
+          if (!incoming || !incoming.transactions) return toast("That file has no EnvironmSafe data.");
+          if (mode === "replace") {
+            if (!confirm("Replace ALL data on this device?")) return;
+            DB = Object.assign(blankDb(), incoming);
+          } else {
+            const added = mergeDb(incoming);
+            toast(`Merged — ${added} new or updated records`);
+          }
+          save(); render();
+        };
+        rd.readAsText(f);
+      };
+      inp.click();
+    };
+    return b;
+  };
+  c2.appendChild(mkImport("merge","Merge a backup","gold"));
+  c2.appendChild(mkImport("replace","Replace all data","ghost"));
+  m.appendChild(c2);
+
+  const c3 = el("div", { class:"card" });
+  c3.innerHTML = `<h2>Export for Excel</h2>
+    <p class="card-note">CSV files open directly in Excel.</p>`;
+  const box = el("div", { style:"display:flex;flex-wrap:wrap;gap:.4rem" });
+  const b3 = el("button", { class:"btn ghost sm" }, "Transactions");
+  b3.onclick = exportTransactionsCsv; box.appendChild(b3);
+  Object.keys(SCHEMAS).forEach(k => {
+    const b = el("button", { class:"btn ghost sm" }, SCHEMAS[k].en);
+    b.onclick = () => exportMasterCsv(k); box.appendChild(b);
+  });
+  c3.appendChild(box);
+  m.appendChild(c3);
+
+  const c4 = el("div", { class:"card" });
+  const counts = ["users","items","assets","customers","suppliers","employees","projects","accounts","categories","transactions"]
+    .map(k => `<tr><td>${esc(k)}</td><td class="num">${rowsOf(k).length}</td></tr>`).join("");
+  c4.innerHTML = `<h2>This device</h2><div class="tablewrap"><table><tbody>${counts}
+    <tr><td>Device ID</td><td class="num">${esc(DB.meta.device || "")}</td></tr></tbody></table></div>`;
+  const b4 = el("button", { class:"btn ghost sm", style:"margin-top:.7rem" }, "Erase everything on this device");
+  b4.onclick = async () => {
+    if (!isAdmin()) return toast("Only an Administrator can erase the device.");
+    if (confirm("Erase all data on this device? Export a backup first.")) {
+      DB = blankDb(); seed(DB); await ensureAdmin(); save();
+      sessionStorage.removeItem(SESSION_KEY);
+      toast("Device cleared"); loginScreen();
+    }
+  };
+  c4.appendChild(b4);
+  m.appendChild(c4);
+}
+
+function mergeDb(incoming) {
+  let n = 0;
+  const tables = ["users","items","assets","customers","suppliers","employees","projects","accounts","categories","transactions"];
+  tables.forEach(tbl => {
+    (incoming[tbl] || []).forEach(r => {
+      if (!r || !r.id) return;
+      const mine = (DB[tbl] || []).find(x => x.id === r.id);
+      if (!mine) { DB[tbl].push(r); n++; }
+      else if ((r.updatedAt || "") > (mine.updatedAt || "")) { Object.assign(mine, r); n++; }
+    });
+    // keep the ID counter ahead of anything that arrived
+    (DB[tbl] || []).forEach(r => {
+      const mm = /^([A-Z]+)-(\d+)$/.exec(r.id || "");
+      if (mm) DB.meta.seq[mm[1]] = Math.max(DB.meta.seq[mm[1]] || 0, parseInt(mm[2],10));
+    });
+  });
+  return n;
+}
+
+/* =========================================================================
+   Generic modal form
+   ========================================================================= */
+
+function modal(title, fields, onSave) {
+  const bg = el("div", { class:"modal-bg" });
+  const box = el("div", { class:"modal" });
+  box.appendChild(el("h2", {}, esc(title)));
+  const form = el("form");
+  const g = el("div", { class:"grid" });
+  fields.forEach(f => {
+    let inner;
+    const v = f.v ?? "";
+    if (f.t === "textarea") inner = `<textarea name="${f.k}" rows="2">${esc(v)}</textarea>`;
+    else if (f.t === "select") inner = `<select name="${f.k}">${["", ...(f.opts || [])].map(o =>
+      `<option ${String(o) === String(v) ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
+    else if (f.t === "ref") inner = refSelect(f.k, f.ref, v);
+    else inner = `<input type="${f.t || "text"}" ${f.t === "number" ? 'step="0.01"' : ""}
+      name="${f.k}" value="${esc(v)}" ${f.req ? "required" : ""}>`;
+    g.appendChild(fld(f.l, inner));
+  });
+  form.appendChild(g);
+  const act = el("div", { class:"actions" });
+  const cancel = el("button", { class:"btn ghost", type:"button" }, t("cancel"));
+  cancel.onclick = () => bg.remove();
+  act.appendChild(cancel);
+  act.appendChild(el("button", { class:"btn gold", type:"submit" }, t("save")));
+  form.appendChild(act);
+  form.onsubmit = e => {
+    e.preventDefault();
+    const vals = Object.fromEntries(new FormData(form).entries());
+    bg.remove();
+    onSave(vals);
+  };
+  box.appendChild(form);
+  bg.appendChild(box);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  document.body.appendChild(bg);
+  const first = box.querySelector("input,select,textarea"); if (first) first.focus();
+}
+
+/* =========================================================================
+   Boot
+   ========================================================================= */
+
+function applyChrome() {
+  document.documentElement.lang = LANG;
+  document.documentElement.dir = LANG === "ar" ? "rtl" : "ltr";
+  $("#coName").textContent = LANG === "ar" ? "إنفايرومسيف" : "EnvironmSafe";
+  $("#coTag").textContent = LANG === "ar" ? "المشتريات والمالية" : "Procurement & Finance";
+  const logo = CO().logo;
+  const box = $("#logoBox");
+  if (logo) {
+    box.textContent = ""; box.classList.add("art");
+    box.style.backgroundImage = `url(${logo})`;
+  }
+}
+
+$("#langSel").value = LANG;
+$("#langSel").onchange = e => {
+  LANG = e.target.value; localStorage.setItem("environmsafe.lang", LANG);
+  applyChrome(); if (USER) render(); else loginScreen();
+};
+$("#acctBtn").onclick = accountMenu;
+
+function fillCurrencySelect() {
+  const list = currencyChoices();
+  $("#curSel").innerHTML = `<option value="">All currencies</option>` +
+    list.map(c => `<option value="${esc(c)}" ${c === CUR ? "selected" : ""}>${esc(c)}</option>`).join("");
+}
+$("#curSel").onchange = e => {
+  CUR = e.target.value;
+  localStorage.setItem("environmsafe.currency", CUR);
+  render();
+};
+
+/* ---------- login ---------- */
+
+const SESSION_KEY = "environmsafe.session";
+
+function chromeForUser() {
+  const on = !!USER;
+  $("#whoami").textContent = on ? `${USER.nameEn} · ${USER.role}` : "";
+  $("#acctBtn").style.display = on ? "" : "none";
+  $("#curSel").style.display = on ? "" : "none";
+  $("#nav").style.display = on ? "" : "none";
+  document.querySelector(".shell").classList.toggle("noauth", !on);
+}
+
+function loginScreen(message) {
+  USER = null;
+  chromeForUser();
+  const m = $("#main"); m.innerHTML = "";
+  const card = el("div", { class:"card", style:"max-width:26rem;margin:2rem auto" });
+  card.innerHTML = `
+    <div style="text-align:center;margin-bottom:1rem">
+      ${CO().logo ? `<img src="${CO().logo}" alt="EnvironmSafe" style="max-width:220px;width:70%">`
+                     : `<h2>EnvironmSafe</h2>`}
+    </div>
+    <h2>Sign in</h2>
+    ${message ? `<p class="card-note" style="color:var(--s-crit)">${esc(message)}</p>` : ""}`;
+  const form = el("form");
+  form.appendChild(fld("Username | اسم المستخدم", `<input name="username" autocomplete="username" required>`));
+  form.appendChild(fld("Password | كلمة المرور", `<input type="password" name="password" autocomplete="current-password" required>`));
+  const btn = el("button", { class:"btn gold", type:"submit", style:"margin-top:.9rem;width:100%" }, "Sign in");
+  form.appendChild(btn);
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(form).entries());
+    const u = userByName(f.username);
+    if (!u || u.active === "No" || !(await checkPassword(u, f.password)))
+      return loginScreen("Wrong username or password.");
+    USER = u;
+    sessionStorage.setItem(SESSION_KEY, u.id);
+    chromeForUser();
+    if (u.mustChange === "Yes") { render(); changePassword(true); }
+    else { toast(`Welcome, ${u.nameEn}`); render(); }
+  };
+  card.appendChild(form);
+  if (rowsOf("users").length === 1 && userByName(DEFAULT_ADMIN.username)?.mustChange === "Yes") {
+    card.appendChild(el("p", { class:"card-note", style:"margin-top:1rem" },
+      `First use: sign in as <b>${DEFAULT_ADMIN.username}</b> with the password
+       <b>${DEFAULT_ADMIN.password}</b>, then change it immediately.`));
+  }
+  m.appendChild(card);
+}
+
+function accountMenu() {
+  const bg = el("div", { class:"modal-bg" });
+  const box = el("div", { class:"modal", style:"width:min(360px,100%)" });
+  box.appendChild(el("h2", {}, esc(`${USER.nameEn} — ${USER.role}`)));
+  box.appendChild(el("p", { class:"card-note" }, esc("Signed in as " + USER.username)));
+  const wrap = el("div", { style:"display:flex;flex-direction:column;gap:.5rem;margin-top:.9rem" });
+  const pw = el("button", { class:"btn ghost" }, "Change my password");
+  pw.onclick = () => { bg.remove(); changePassword(false); };
+  const out = el("button", { class:"btn" }, "Sign out");
+  out.onclick = () => { sessionStorage.removeItem(SESSION_KEY); bg.remove(); loginScreen(); };
+  const close = el("button", { class:"btn ghost" }, t("cancel"));
+  close.onclick = () => bg.remove();
+  wrap.appendChild(pw); wrap.appendChild(out); wrap.appendChild(close);
+  box.appendChild(wrap);
+  bg.appendChild(box);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  document.body.appendChild(bg);
+}
+
+function changePassword(forced) {
+  const fields = [{ k:"p1", l:"New password", t:"password", req:true },
+                  { k:"p2", l:"Repeat new password", t:"password", req:true }];
+  if (!forced) fields.unshift({ k:"old", l:"Current password", t:"password", req:true });
+  modal(forced ? "Choose your password" : "Change password", fields, async vals => {
+    if (!forced && !(await checkPassword(USER, vals.old))) return toast("Current password is wrong.");
+    if (vals.p1.length < 6) return toast("Use at least 6 characters.");
+    if (vals.p1 !== vals.p2) return toast("The two passwords do not match.");
+    await setPassword(USER, vals.p1);
+    USER.mustChange = "No";
+    save(); render(); toast("Password changed");
+  });
+}
+
+/* ---------- boot ---------- */
+
+(async () => {
+  applyChrome();
+  await ensureAdmin();
+  save();
+  const id = sessionStorage.getItem(SESSION_KEY);
+  const u = id ? rowsOf("users").find(x => x.id === id) : null;
+  if (u && u.active !== "No") {
+    USER = u; chromeForUser();
+    const v = viewFromHash(); if (v) VIEW = v;
+    render();
+  }
+  else loginScreen();
+})();
+</script>
