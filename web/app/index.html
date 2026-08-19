@@ -579,8 +579,21 @@ function saveFile(filename, content, mime = "application/json") {
     try { AndroidBridge.saveFile(filename, content); toast("Saved to Downloads: " + filename); return; }
     catch (e) { /* fall through */ }
   }
-  const blob = new Blob([content], { type:mime });
+  deliverBlob(filename, new Blob([content], { type:mime }));
+}
+
+/* Hands a finished file to the user. A sandboxed preview frame swallows
+   <a download> without raising anything, so the button looks dead; there we
+   offer a tab instead and say plainly when even that is refused. */
+function deliverBlob(filename, blob) {
   const url = URL.createObjectURL(blob);
+  if (EMBEDDED) {
+    let w = null;
+    try { w = window.open(url, "_blank", "noopener"); } catch (e) { w = null; }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    toast(w ? "Opened in a new tab \u2014 save the file from there." : RESTRICTED_MSG);
+    return;
+  }
   const a = el("a", { href:url, download:filename });
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
@@ -1145,6 +1158,9 @@ function viewDaily(m) {
     if (ty.cash && !f.accountId) return toast("Select the bank or cash account used.");
     if (f.isAsset === "Yes" && !isPurchase(f.type))
       return toast("Only a purchase (supplier bill, expense or payment out) can create an asset.");
+    const warn = duplicateTxWarning({ date:f.date, type:f.type, amount, refNo:f.refNo,
+      customerId:f.customerId, supplierId:f.supplierId, employeeId:f.employeeId });
+    if (warn && !confirm(warn)) return;
     const now = new Date().toISOString();
     const tx = {
       id: nextId("TRX"), date:f.date, type:f.type, phase:f.phase, caseNo:f.caseNo.trim(),
@@ -1171,6 +1187,63 @@ function viewDaily(m) {
   c2.appendChild(el("h2", {}, "Last 12 entries"));
   c2.appendChild(txTable(recent));
   m.appendChild(c2);
+}
+
+/* -------------------------------------------------------------------------
+   Duplicate guard — the same bill reaches the office twice, two people enter
+   the same payment, or Save is tapped twice on a slow phone. Before a new
+   transaction is written we look for one already recorded that looks like it,
+   show what was found and let the user decide. Nothing is ever blocked.
+   ------------------------------------------------------------------------- */
+
+const DUP_DAYS = 3;              // how far apart two entries can be and still look alike
+const DUP_AMOUNT_TOLERANCE = 1;  // percent — covers rounding and small fee differences
+
+const dayDiff = (a, b) => {
+  const x = new Date(a + "T00:00:00").getTime(), y = new Date(b + "T00:00:00").getTime();
+  return (isNaN(x) || isNaN(y)) ? null : Math.abs(x - y) / 86400000;
+};
+const sameParty = (a, b) =>
+  (a.customerId || "") === (b.customerId || "") &&
+  (a.supplierId || "") === (b.supplierId || "") &&
+  (a.employeeId || "") === (b.employeeId || "");
+const closeAmount = (a, b) => {
+  if (a <= 0 || b <= 0) return a === b;
+  return Math.abs(a - b) <= Math.max(a, b) * DUP_AMOUNT_TOLERANCE / 100;
+};
+
+/** Transactions already recorded that look like `cand`, most recent first. */
+function similarTransactions(cand, list) {
+  list = list || DB.transactions;
+  const ref = (cand.refNo || "").trim().toLowerCase();
+  const amount = num(cand.amount);
+  return list.filter(x => {
+    if (!x || x.id === cand.id) return false;                      // never match itself
+    // Same reference number is a duplicate on its own — that is what a reference is for.
+    if (ref && (x.refNo || "").trim().toLowerCase() === ref) return true;
+    if (x.type !== cand.type) return false;
+    if (!sameParty(x, cand)) return false;
+    if (!closeAmount(amountOf(x), amount)) return false;
+    const dd = dayDiff(x.date, cand.date);
+    return dd !== null && dd <= DUP_DAYS;
+  }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+}
+
+/** The confirm() text for a near-duplicate — "" when nothing looks similar. */
+function duplicateTxWarning(cand, list) {
+  const dups = similarTransactions(cand, list);
+  if (!dups.length) return "";
+  const d = dups[0];
+  const party = nameOf("customers", d.customerId) || nameOf("suppliers", d.supplierId)
+             || nameOf("employees", d.employeeId) || "";
+  const line = [d.id, d.date, d.type, fmt(amountOf(d)) + " " + (d.currency || ""), party,
+                d.refNo ? "Ref " + d.refNo : ""].filter(Boolean).join(" · ");
+  const ar = LANG === "ar";
+  let msg = (ar ? "\u26a0\ufe0f توجد حركة مشابهة مسجّلة بالفعل:\n" : "\u26a0\ufe0f A similar transaction is already recorded:\n") + line;
+  if (dups.length > 1)
+    msg += ar ? `\n(ويوجد ${dups.length - 1} إدخال قريب آخر)` : `\n(and ${dups.length - 1} other close entry/entries)`;
+  return msg + (ar ? "\n\nهل تريد المتابعة والحفظ على أي حال؟"
+                   : "\n\nDo you want to continue and save it anyway?");
 }
 
 /** Purchase-side transactions are the ones that can bring an asset into the company. */
@@ -1580,13 +1653,33 @@ function viewReport(m, kind) {
 
 const EMBEDDED = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
 
+const RESTRICTED_MSG = "Printing and file downloads are blocked in this preview. " +
+  "Open the system at its own web address, or use the Android app.";
+
+/* Tells the user once, up front, that this surface cannot print or download —
+   far better than letting them press the buttons and conclude the app is broken. */
+function previewBanner() {
+  if (!EMBEDDED || document.getElementById("previewBanner")) return;
+  const b = el("div", { id:"previewBanner", class:"noprint",
+    style:"background:var(--s-warn);color:#fff;font-size:.8rem;padding:.45rem .9rem;text-align:center" },
+    RESTRICTED_MSG);
+  const bar = document.querySelector(".topbar");
+  if (bar && bar.parentNode) bar.parentNode.insertBefore(b, bar.nextSibling);
+}
+
 function doPrint(jobName) {
   const name = (jobName || "EnvironmSafe report").replace(/[^\w .-]/g, " ").trim();
   if (window.AndroidBridge && window.AndroidBridge.printPage) {
     try { AndroidBridge.printPage(name); return; } catch (e) { /* fall through */ }
   }
+  // A sandboxed preview frame blocks the print dialogue outright: window.print()
+  // returns having opened nothing, which reads as a broken button. In a real tab
+  // or inside the APK this branch never runs.
   if (EMBEDDED) {
-    toast("Printing is blocked inside this preview — open the app, or save the system file and open it in Chrome.");
+    let w = null;
+    try { w = window.open(location.href, "_blank", "noopener"); } catch (e) { w = null; }
+    toast(w ? "Opened in a new tab \u2014 print from there." : RESTRICTED_MSG);
+    return;
   }
   try { window.print(); } catch (e) {
     toast("This browser would not open the print dialogue. Use Download Excel instead.");
@@ -1794,11 +1887,10 @@ function saveXlsx(filename, sheetName, rows, opts) {
     try { AndroidBridge.saveBytes(filename, btoa(bin)); toast("Saved " + filename); return; }
     catch (e) { /* fall through to a browser download */ }
   }
-  const blob = new Blob([bytes], { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-  const url = URL.createObjectURL(blob);
-  const a = el("a", { href:url, download:filename });
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  // Goes through deliverBlob so a sandboxed preview reports the block instead of
+  // dropping the file on the floor — the same path every other download uses.
+  deliverBlob(filename, new Blob([bytes],
+    { type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
 }
 
 /** The official document as a spreadsheet, laid out like the paper form. */
@@ -2696,6 +2788,7 @@ function changePassword(forced) {
 
 (async () => {
   applyChrome();
+  previewBanner();
   await ensureAdmin();
   save();
   const id = sessionStorage.getItem(SESSION_KEY);
