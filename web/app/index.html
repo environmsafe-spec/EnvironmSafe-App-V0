@@ -2526,8 +2526,158 @@ function viewCompany(m) {
   m.appendChild(prev);
 }
 
+/* =========================================================================
+   Cloud account — the identity a device syncs its books under.
+   Everything here is optional and additive: with no connection, or with no
+   account, the system behaves exactly as it always has on the device's own
+   copy. No cloud call is ever allowed to block or break the app.
+   ========================================================================= */
+
+const CLOUD = {
+  url: "https://mcgjrsfsppdcnvolqsgs.supabase.co",
+  // A publishable key is designed to sit in client code. What protects the
+  // records is the database's row-level security, not the secrecy of this key:
+  // it grants nothing until someone signs in, and then only their own company.
+  key: "sb_publishable_R_5WX_WMMXZCkGnwfp6ZTw_dtUaq1qx"
+};
+const CLOUD_KEY = "environmsafe.cloud.session";
+
+let CLOUD_SESSION = null;
+try { CLOUD_SESSION = JSON.parse(localStorage.getItem(CLOUD_KEY) || "null"); } catch (e) { CLOUD_SESSION = null; }
+
+function cloudSave(s) {
+  CLOUD_SESSION = s;
+  try { s ? localStorage.setItem(CLOUD_KEY, JSON.stringify(s)) : localStorage.removeItem(CLOUD_KEY); }
+  catch (e) { /* private mode: the session simply will not outlive the tab */ }
+}
+const cloudEmail    = () => (CLOUD_SESSION && CLOUD_SESSION.email) || "";
+const cloudSignedIn = () => !!(CLOUD_SESSION && CLOUD_SESSION.refresh_token);
+
+async function cloudFetch(path, opts) {
+  opts = opts || {};
+  const r = await fetch(CLOUD.url + path, Object.assign({}, opts, {
+    headers: Object.assign({ apikey: CLOUD.key, "Content-Type": "application/json" }, opts.headers || {})
+  }));
+  const text = await r.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch (e) { body = { raw: text }; }
+  if (!r.ok) {
+    const msg = (body && (body.error_description || body.msg || body.message || body.error)) || ("HTTP " + r.status);
+    const err = new Error(msg); err.status = r.status; err.body = body; throw err;
+  }
+  return body;
+}
+
+function cloudStore(d, email) {
+  cloudSave({
+    email: (d.user && d.user.email) || email || "",
+    userId: (d.user && d.user.id) || "",
+    access_token: d.access_token,
+    refresh_token: d.refresh_token,
+    expires_at: Date.now() + ((d.expires_in || 3600) * 1000)
+  });
+}
+
+async function cloudSignIn(email, password) {
+  const d = await cloudFetch("/auth/v1/token?grant_type=password",
+    { method:"POST", body: JSON.stringify({ email: email, password: password }) });
+  cloudStore(d, email);
+  return { signedIn:true };
+}
+
+async function cloudSignUp(email, password) {
+  const d = await cloudFetch("/auth/v1/signup",
+    { method:"POST", body: JSON.stringify({ email: email, password: password }) });
+  // A project that asks for email confirmation returns a user but no token.
+  if (d && d.access_token) { cloudStore(d, email); return { signedIn:true }; }
+  return { signedIn:false };
+}
+
+/** A usable access token, refreshed near expiry. null when it cannot be had. */
+async function cloudToken() {
+  if (!cloudSignedIn()) return null;
+  if (CLOUD_SESSION.access_token && Date.now() < (CLOUD_SESSION.expires_at - 60000))
+    return CLOUD_SESSION.access_token;
+  try {
+    const d = await cloudFetch("/auth/v1/token?grant_type=refresh_token",
+      { method:"POST", body: JSON.stringify({ refresh_token: CLOUD_SESSION.refresh_token }) });
+    cloudStore(d, cloudEmail());
+    return CLOUD_SESSION.access_token;
+  } catch (e) {
+    // Being offline must not sign anyone out; only a refused token ends a session.
+    if (e.status >= 400 && e.status < 500) cloudSave(null);
+    return null;
+  }
+}
+
+function cloudSignOut() { cloudSave(null); }
+
+/** Turns a failure into a sentence the user can act on. */
+function cloudMessage(e) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false)
+    return "No internet connection. The system keeps working on this device.";
+  const m = String((e && e.message) || "");
+  if (/Failed to fetch|NetworkError|Load failed|ERR_/i.test(m)) return "Could not reach the cloud service. Check the connection and try again.";
+  if (/Invalid login credentials/i.test(m))  return "That email or password is not right.";
+  if (/Email not confirmed/i.test(m))        return "Confirm the account from the email we sent, then sign in.";
+  if (/already registered/i.test(m))         return "That email already has an account — use Sign in.";
+  if (/Password should be/i.test(m))         return "Password too short — use at least 6 characters.";
+  return m || "Something went wrong.";
+}
+
+/** The Cloud account card on Backup & sync. */
+function cloudCard(m) {
+  const c = el("div", { class:"card" });
+  c.appendChild(el("h2", {}, "Cloud account"));
+  const note = el("p", { class:"card-note" });
+  const box = el("div");
+  c.appendChild(note); c.appendChild(box);
+
+  const draw = () => {
+    box.innerHTML = "";
+    if (cloudSignedIn()) {
+      note.textContent = "This device is linked to a cloud account. Your records still live on this device — "
+        + "syncing them is the next step.";
+      box.appendChild(el("p", { style:"margin:.2rem 0 .6rem" }, "Signed in as <b>" + esc(cloudEmail()) + "</b>"));
+      const out = el("button", { class:"btn ghost" }, "Sign out of cloud");
+      out.onclick = () => { cloudSignOut(); draw(); toast("Signed out of the cloud account."); };
+      box.appendChild(out);
+      return;
+    }
+    note.textContent = "Link this device to a cloud account so the books can be restored on a new phone. "
+      + "Nothing is uploaded yet.";
+    const g = el("div", { class:"grid" });
+    g.appendChild(fld("Email | البريد", '<input type="email" id="cl_email" autocomplete="username">'));
+    g.appendChild(fld("Password | كلمة السر", '<input type="password" id="cl_pw" autocomplete="current-password">'));
+    box.appendChild(g);
+    const bar = el("div", { style:"margin-top:.6rem;display:flex;gap:.5rem;flex-wrap:wrap" });
+    const bIn = el("button", { class:"btn gold" }, "Sign in");
+    const bUp = el("button", { class:"btn ghost" }, "Create account");
+    const run = async (fn, okMsg) => {
+      const em = ($("#cl_email").value || "").trim(), pw = $("#cl_pw").value || "";
+      if (!em || !pw) return toast("Enter the email and the password.");
+      bIn.disabled = bUp.disabled = true;
+      try {
+        const r = await fn(em, pw);
+        if (r && r.signedIn === false) toast("Account created. Confirm it from your email, then sign in.");
+        else toast(okMsg);
+        draw();
+      } catch (e) { toast(cloudMessage(e)); }
+      finally { bIn.disabled = bUp.disabled = false; }
+    };
+    bIn.onclick = () => run(cloudSignIn, "Signed in.");
+    bUp.onclick = () => run(cloudSignUp, "Account created and signed in.");
+    bar.appendChild(bIn); bar.appendChild(bUp);
+    box.appendChild(bar);
+  };
+  draw();
+  m.appendChild(c);
+}
+
 function viewData(m) {
   pageHead(m, t("data"), "Move data between the phones and computers of your 5 users");
+
+  cloudCard(m);
 
   const c1 = el("div", { class:"card" });
   c1.innerHTML = `<h2>Backup</h2><p class="card-note">Writes one file containing every record.
