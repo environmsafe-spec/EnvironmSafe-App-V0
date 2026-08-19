@@ -1,0 +1,20 @@
+# EnvironmSafe — Procurement & Financial Management
+# Publishes web/ : "/" is the landing page, "/app/" is the system itself.
+
+[build]
+  publish = "web"
+
+# The system is a single file that keeps its data in the browser. Never let a
+# stale copy be served after a deploy, or a phone keeps running last week's app.
+[[headers]]
+  for = "/app/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
