@@ -472,6 +472,7 @@ function load() {
 function save() {
   try { localStorage.setItem(DB_KEY, JSON.stringify(DB)); }
   catch (e) { toast("Storage is full — export a backup and remove old attachments."); }
+  scheduleSync();
 }
 function seed(d) {
   const now = new Date().toISOString();
@@ -2659,6 +2660,176 @@ function cloudMessage(e) {
   return m || "Something went wrong.";
 }
 
+/* =========================================================================
+   Sync engine.
+   The device stays the working copy: everything is written locally first and
+   the app never waits for the network. Syncing pushes what changed here, then
+   takes what changed elsewhere. Records are matched by uid, so two phones can
+   both be busy offline without either losing work.
+
+   Where the same record was edited on two devices, the later write wins. That
+   is a real choice, not an oversight: for a ledger where entries are added far
+   more often than they are re-edited, it keeps every new record and can only
+   ever cost the earlier of two edits to one field.
+   ========================================================================= */
+
+const SYNC_KEY = "environmsafe.sync";
+const blankSync = () => ({ companyId:"", role:"", lastPull:"", lastAt:"", synced:{} });
+
+let SYNC = blankSync();
+try { SYNC = Object.assign(blankSync(), JSON.parse(localStorage.getItem(SYNC_KEY) || "null") || {}); }
+catch (e) { SYNC = blankSync(); }
+let SYNC_RUNNING = false;
+
+function syncSave() {
+  try { localStorage.setItem(SYNC_KEY, JSON.stringify(SYNC)); } catch (e) { /* full: sync still works this session */ }
+}
+function syncReset() { SYNC = blankSync(); syncSave(); }
+
+const recKey = (tbl, uid) => tbl + "/" + uid;
+
+/** Cheap content fingerprint: is this record still what we last exchanged? */
+function hashOf(o) {
+  const s = JSON.stringify(o);
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36) + ":" + s.length;
+}
+
+async function cloudRest(path, opts) {
+  opts = opts || {};
+  const token = await cloudToken();
+  if (!token) throw new Error("Not signed in to the cloud account.");
+  return cloudFetch("/rest/v1" + path, Object.assign({}, opts, {
+    headers: Object.assign({ Authorization: "Bearer " + token }, opts.headers || {})
+  }));
+}
+
+/** Which company these books belong to, and this user's role in it. */
+async function syncCompany() {
+  const rows = await cloudRest("/es_members?select=company_id,role");
+  if (!rows || !rows.length)
+    throw new Error("This account has not been added to a company yet.");
+  SYNC.companyId = rows[0].company_id;
+  SYNC.role = rows[0].role;
+  syncSave();
+  return SYNC.companyId;
+}
+
+/** Everything on this device that differs from what was last exchanged. */
+function pendingChanges() {
+  const changes = [], seen = Object.create(null);
+  SYNC_TABLES.forEach(tbl => (DB[tbl] || []).forEach(r => {
+    if (!r || !r.uid) return;
+    const k = recKey(tbl, r.uid), h = hashOf(r);
+    seen[k] = 1;
+    if (SYNC.synced[k] !== h) changes.push({ collection:tbl, record_id:r.uid, data:r, deleted:false, _k:k, _h:h });
+  }));
+  // The company letterhead belongs to the books, so it travels too. The id
+  // counters deliberately do not: they are what makes each device's numbers its own.
+  const co = DB.meta && DB.meta.company;
+  if (co) {
+    const k = recKey("meta", "company"), h = hashOf(co);
+    seen[k] = 1;
+    if (SYNC.synced[k] !== h) changes.push({ collection:"meta", record_id:"company", data:co, deleted:false, _k:k, _h:h });
+  }
+  // Anything exchanged before and no longer here was deleted on this device.
+  Object.keys(SYNC.synced).forEach(k => {
+    if (seen[k]) return;
+    const i = k.indexOf("/");
+    changes.push({ collection:k.slice(0, i), record_id:k.slice(i + 1), data:{}, deleted:true, _k:k, _h:"" });
+  });
+  return changes;
+}
+
+const pendingCount = () => (cloudSignedIn() ? pendingChanges().length : 0);
+
+async function syncPush() {
+  const changes = pendingChanges();
+  if (!changes.length) return 0;
+  const cid = SYNC.companyId;
+  const rows = changes.map(c => ({ company_id:cid, collection:c.collection,
+                                   record_id:c.record_id, data:c.data, deleted:c.deleted }));
+  // Sent in batches so one very large first sync cannot fail as a single request.
+  for (let i = 0; i < rows.length; i += 200) {
+    await cloudRest("/es_records?on_conflict=company_id,collection,record_id", {
+      method:"POST",
+      headers:{ Prefer:"resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(rows.slice(i, i + 200))
+    });
+  }
+  // Only mark as exchanged once the server has actually taken it.
+  changes.forEach(c => { if (c.deleted) delete SYNC.synced[c._k]; else SYNC.synced[c._k] = c._h; });
+  syncSave();
+  return changes.length;
+}
+
+async function syncPull() {
+  const since = SYNC.lastPull || "1970-01-01T00:00:00Z";
+  const rows = await cloudRest("/es_records?company_id=eq." + encodeURIComponent(SYNC.companyId)
+    + "&updated_at=gt." + encodeURIComponent(since)
+    + "&select=collection,record_id,data,deleted,updated_at&order=updated_at.asc&limit=5000");
+  let applied = 0, newest = SYNC.lastPull || "";
+  (rows || []).forEach(row => {
+    if (!row.updated_at) return;
+    if (row.updated_at > newest) newest = row.updated_at;
+    const k = recKey(row.collection, row.record_id);
+
+    if (row.collection === "meta") {
+      if (row.record_id === "company" && !row.deleted) {
+        DB.meta.company = row.data; SYNC.synced[k] = hashOf(row.data); applied++;
+      }
+      return;
+    }
+    const list = DB[row.collection];
+    if (!Array.isArray(list)) return;
+    const idx = list.findIndex(x => x && x.uid === row.record_id);
+
+    if (row.deleted) {
+      if (idx >= 0) { list.splice(idx, 1); applied++; }
+      delete SYNC.synced[k];
+      return;
+    }
+    if (idx < 0) { list.push(row.data); applied++; }
+    else if (hashOf(list[idx]) !== hashOf(row.data)) { list[idx] = row.data; applied++; }
+    SYNC.synced[k] = hashOf(row.data);
+  });
+  if (newest) SYNC.lastPull = newest;
+  syncSave();
+  return applied;
+}
+
+/** Push then pull. Never throws at the caller; reports in plain words. */
+async function syncNow(quiet) {
+  if (!cloudSignedIn()) { if (!quiet) toast("Sign in to the cloud account first."); return null; }
+  if (SYNC_RUNNING) return null;
+  SYNC_RUNNING = true;
+  try {
+    if (!SYNC.companyId) await syncCompany();
+    const pushed = await syncPush();
+    const pulled = await syncPull();
+    SYNC.lastAt = new Date().toISOString();
+    syncSave();
+    if (pulled) save();
+    if (!quiet) toast("Synced — " + pushed + " sent, " + pulled + " received");
+    return { pushed: pushed, pulled: pulled };
+  } catch (e) {
+    if (!quiet) toast(cloudMessage(e));
+    return null;
+  } finally { SYNC_RUNNING = false; }
+}
+
+/* A quiet sync shortly after a change, so ordinary use keeps the books current
+   without anyone having to remember to press anything. */
+let syncTimer = null;
+function scheduleSync() {
+  if (!cloudSignedIn() || SYNC_RUNNING) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    syncNow(true).then(r => { if (r && r.pulled && typeof render === "function") render(); });
+  }, 4000);
+}
+
 /** The Cloud account card on Backup & sync. */
 function cloudCard(m) {
   const c = el("div", { class:"card" });
@@ -2670,12 +2841,32 @@ function cloudCard(m) {
   const draw = () => {
     box.innerHTML = "";
     if (cloudSignedIn()) {
-      note.textContent = "This device is linked to a cloud account. Your records still live on this device — "
-        + "syncing them is the next step.";
-      box.appendChild(el("p", { style:"margin:.2rem 0 .6rem" }, "Signed in as <b>" + esc(cloudEmail()) + "</b>"));
+      const waiting = pendingCount();
+      note.textContent = "Your records live on this device and are copied to the cloud, so a lost or "
+        + "broken phone costs you nothing. Signing in on another device brings them back.";
+      const when = SYNC.lastAt ? new Date(SYNC.lastAt).toLocaleString() : "not yet";
+      box.appendChild(el("p", { style:"margin:.2rem 0 .5rem" },
+        "Signed in as <b>" + esc(cloudEmail()) + "</b>"
+        + (SYNC.role ? " &middot; " + esc(SYNC.role) : "")
+        + "<br><span class=\"card-note\">Last synced: " + esc(when)
+        + " &middot; waiting to send: " + waiting + "</span>"));
+      const bar = el("div", { style:"display:flex;gap:.5rem;flex-wrap:wrap" });
+      const bSync = el("button", { class:"btn gold" }, "Sync now");
+      bSync.onclick = async () => {
+        bSync.disabled = true; bSync.textContent = "Syncing\u2026";
+        const r = await syncNow(false);
+        bSync.disabled = false; bSync.textContent = "Sync now";
+        draw();
+        if (r && r.pulled) render();
+      };
       const out = el("button", { class:"btn ghost" }, "Sign out of cloud");
-      out.onclick = () => { cloudSignOut(); draw(); toast("Signed out of the cloud account."); };
-      box.appendChild(out);
+      out.onclick = () => {
+        // The local books stay; only the link to the cloud account is removed.
+        cloudSignOut(); syncReset(); draw();
+        toast("Signed out of the cloud account. The records on this device are untouched.");
+      };
+      bar.appendChild(bSync); bar.appendChild(out);
+      box.appendChild(bar);
       return;
     }
     note.textContent = "Link this device to a cloud account so the books can be restored on a new phone. "
@@ -2693,9 +2884,13 @@ function cloudCard(m) {
       bIn.disabled = bUp.disabled = true;
       try {
         const r = await fn(em, pw);
-        if (r && r.signedIn === false) toast("Account created. Confirm it from your email, then sign in.");
-        else toast(okMsg);
+        if (r && r.signedIn === false) { toast("Account created. Confirm it from your email, then sign in."); draw(); return; }
+        toast(okMsg);
         draw();
+        // A device signing in for the first time should fill up straight away.
+        const s = await syncNow(false);
+        draw();
+        if (s && s.pulled) render();
       } catch (e) { toast(cloudMessage(e)); }
       finally { bIn.disabled = bUp.disabled = false; }
     };
