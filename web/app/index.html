@@ -496,9 +496,43 @@ function seed(d) {
     { nameEn:"Bank charges", nameAr:"عمولات بنكية", kind:"Finance" }
   ]);
 }
+/* Record identity.
+   Two phones working offline both reach "TRX-0005" from their own counters, so a
+   number alone cannot say which record is which — merging on it silently drops
+   one of two real invoices. Every record therefore also carries `uid`, unique
+   everywhere, and that is what merging and syncing match on. The visible number
+   additionally carries a short device tag so two devices cannot show the same
+   document number either. */
+
+const SYNC_TABLES = ["users","items","assets","customers","suppliers","employees",
+                     "projects","accounts","categories","transactions"];
+
+function newUid() {
+  try { if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+  return "u-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,10);
+}
+
+/** Two or three stable characters identifying this device, from its own id. */
+function deviceTag() {
+  const d = String((DB.meta && DB.meta.device) || "");
+  const m = /([a-z0-9]{2,})$/i.exec(d);
+  return m ? m[1].slice(-2).toUpperCase() : "";
+}
+
+/** Older records predate uid; give them one the first time they are seen. */
+function ensureUids() {
+  let added = 0;
+  SYNC_TABLES.forEach(tbl => (DB[tbl] || []).forEach(r => {
+    if (r && !r.uid) { r.uid = newUid(); added++; }
+  }));
+  return added;
+}
+
 function nextId(prefix) {
   DB.meta.seq[prefix] = (DB.meta.seq[prefix] || 0) + 1;
-  return `${prefix}-${String(DB.meta.seq[prefix]).padStart(4,"0")}`;
+  const n = String(DB.meta.seq[prefix]).padStart(4,"0");
+  const tag = deviceTag();
+  return tag ? `${prefix}-${tag}-${n}` : `${prefix}-${n}`;
 }
 
 /* ---------- helpers ---------- */
@@ -2761,13 +2795,29 @@ function mergeDb(incoming) {
   tables.forEach(tbl => {
     (incoming[tbl] || []).forEach(r => {
       if (!r || !r.id) return;
-      const mine = (DB[tbl] || []).find(x => x.id === r.id);
-      if (!mine) { DB[tbl].push(r); n++; }
-      else if ((r.updatedAt || "") > (mine.updatedAt || "")) { Object.assign(mine, r); n++; }
+      const list = DB[tbl] || [];
+      // Match on uid when the incoming record has one, falling back to the number
+      // for records written before uids existed. A uid is never invented for an
+      // incoming record before matching: doing so made the same old backup import
+      // as a new record every time it was merged.
+      const mine = r.uid
+        ? (list.find(x => x.uid === r.uid) || list.find(x => !x.uid && x.id === r.id))
+        : list.find(x => x.id === r.id);
+      if (!mine) {
+        if (!r.uid) r.uid = newUid();
+        list.push(r); n++;
+      } else if ((r.updatedAt || "") > (mine.updatedAt || "")) {
+        const keep = mine.uid || r.uid || newUid();   // identity, once settled, never changes
+        Object.assign(mine, r);
+        mine.uid = keep;
+        n++;
+      } else if (!mine.uid) {
+        mine.uid = r.uid || newUid();
+      }
     });
     // keep the ID counter ahead of anything that arrived
     (DB[tbl] || []).forEach(r => {
-      const mm = /^([A-Z]+)-(\d+)$/.exec(r.id || "");
+      const mm = /^([A-Z]+)-(?:[A-Z0-9]{1,4}-)?(\d+)$/.exec(r.id || "");
       if (mm) DB.meta.seq[mm[1]] = Math.max(DB.meta.seq[mm[1]] || 0, parseInt(mm[2],10));
     });
   });
@@ -2939,6 +2989,9 @@ function changePassword(forced) {
 (async () => {
   applyChrome();
   previewBanner();
+  // Records saved before uids existed get one now, once, so merging and syncing
+  // can tell two devices' records apart.
+  if (ensureUids()) save();
   await ensureAdmin();
   save();
   const id = sessionStorage.getItem(SESSION_KEY);
