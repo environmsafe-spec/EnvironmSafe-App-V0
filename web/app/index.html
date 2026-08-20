@@ -209,12 +209,33 @@
   .doc-pay h3 { margin:0 0 .15rem; font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
     color:var(--muted); font-family:var(--mono); font-weight:500; }
   .doc-pay p { margin:0; }
+  @page { margin: 10mm; }
+
   @media print {
     .topbar, nav.side, .toolbar, .noprint { display:none !important; }
     .shell { display:block; }
     main { padding:0; }
     body { background:#fff; color:#000; font-size:11px; }
     .card, .tablewrap { border:0; box-shadow:none; }
+
+    /* On screen a wide table scrolls sideways. On paper there is nowhere to
+       scroll, so every column past the page edge was silently cut off — a
+       printed ledger lost its Debit and Credit, a statement lost its Balance.
+       The table gets the whole page and its text wraps instead. */
+    .tablewrap { overflow:visible !important; }
+    table { width:100% !important; font-size:9px; }
+    th, td { white-space:normal !important; overflow-wrap:break-word; padding:.22rem .28rem; }
+    /* Money must never be broken across lines, so figures stay on one line. */
+    td.num, th.num { white-space:nowrap !important; }
+    /* Sticky headings are a screen affordance and misplace themselves on paper. */
+    th { position:static !important; }
+    /* Column headings repeat on each page and totals stay with their table. */
+    thead { display:table-header-group; }
+    tfoot { display:table-footer-group; }
+    tr, th, td { page-break-inside:avoid; }
+    /* The chart carries a screen minimum width that would hang off the page. */
+    .chart { overflow:visible !important; }
+    .chart svg { min-width:0 !important; width:100% !important; height:auto; }
     .printhead { display:flex; align-items:center; gap:.75rem; border-bottom:2px solid #1A2744; padding-bottom:.4rem; margin-bottom:.6rem; }
     .printhead .logo { background:#E8A317; color:#1A2744; }
     th { background:#eee !important; color:#000; }
