@@ -19,6 +19,7 @@ npm test -- sync     # only suites whose name contains "sync"
 | `print` | Columns falling off the printed page. A wide table scrolls on screen; paper cannot scroll, and the ledger once printed without Debit and Credit. Widths are measured at A4 |
 | `cloud account` | Being signed out by a weak connection, an expired token not renewing, a session not surviving a restart, failures shown as HTTP codes instead of sentences |
 | `sync` | The point of the whole thing: a replacement phone signing in and recovering the ledger. Also deletions returning from the dead, and work done offline being lost |
+| `drive backup` | The copy the company owns outright going stale or absent: a folder made afresh every day, old copies never cleared, a token Google has refused being reused, and being offline looking like a failure of the books |
 
 ## The stand-in server
 

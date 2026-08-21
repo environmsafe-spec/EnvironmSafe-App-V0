@@ -82,11 +82,55 @@ function startMockSupabase(port, opts) {
           }
         }
       }
+      /* ---- Google Drive, enough of it to exercise the backup ---- */
+      if (u.startsWith('/drive/v3/files') || u.startsWith('/upload/drive/v3/files')) {
+        if (!(req.headers.authorization || '').startsWith('Bearer '))
+          return send(401, { error: { message: 'Invalid Credentials' } });
+        if (srv.driveFails) { const f = srv.driveFails; srv.driveFails = 0;
+          return send(f, { error: { message: 'staged failure' } }); }
+
+        if (u.startsWith('/upload/drive/v3/files') && req.method === 'POST') {
+          // The body is multipart/related: metadata part, then the file itself.
+          const meta = /\{[\s\S]*?\}/.exec(body);
+          let name = 'unnamed', parents = [];
+          try { const m = JSON.parse(meta[0]); name = m.name; parents = m.parents || []; } catch (e) {}
+          const id = 'file-' + (++srv.driveSeq);
+          srv.driveFiles.set(id, { id, name, parents,
+            mimeType:'application/json', createdTime: new Date(Date.now() + srv.driveSeq * 1000).toISOString(),
+            size: body.length });
+          return send(200, { id, name });
+        }
+        const del = /^\/drive\/v3\/files\/([^?]+)/.exec(u);
+        if (del && req.method === 'DELETE') { srv.driveFiles.delete(del[1]); return send(204, null); }
+
+        if (req.method === 'POST') {                       // create a folder
+          const id = 'folder-' + (++srv.driveSeq);
+          srv.driveFiles.set(id, { id, name: p.name, mimeType: p.mimeType, parents: [],
+            createdTime: new Date().toISOString() });
+          return send(200, { id, name: p.name });
+        }
+        if (req.method === 'GET') {                        // list / search
+          const q = decodeURIComponent((/[?&]q=([^&]*)/.exec(u) || [,''])[1]);
+          let files = [...srv.driveFiles.values()];
+          const byName = /name='([^']+)'/.exec(q);
+          const inParent = /'([^']+)' in parents/.exec(q);
+          if (byName)   files = files.filter(f => f.name === byName[1]);
+          if (/mimeType='application\/vnd\.google-apps\.folder'/.test(q))
+            files = files.filter(f => f.mimeType === 'application/vnd.google-apps.folder');
+          if (inParent) files = files.filter(f => (f.parents || []).includes(inParent[1]));
+          files.sort((a, b) => b.createdTime.localeCompare(a.createdTime));   // newest first
+          return send(200, { files });
+        }
+      }
+
       send(404, { message: 'not found' });
     });
   });
 
   srv.refreshes = 0;
+  srv.driveFiles = new Map();
+  srv.driveSeq = 0;
+  srv.driveFails = 0;
   srv.stored = () => rows;
   return new Promise(r => srv.listen(port, '127.0.0.1', () => r(srv)));
 }

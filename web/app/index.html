@@ -2832,6 +2832,8 @@ async function syncNow(quiet) {
     SYNC.lastAt = new Date().toISOString();
     syncSave();
     if (pulled) save();
+    // With the books safely up, take the day's copy if one is due.
+    driveMaybeBackup();
     if (!quiet) toast("Synced — " + pushed + " sent, " + pulled + " received");
     return { pushed: pushed, pulled: pulled };
   } catch (e) {
@@ -2849,6 +2851,246 @@ function scheduleSync() {
   syncTimer = setTimeout(() => {
     syncNow(true).then(r => { if (r && r.pulled && typeof render === "function") render(); });
   }, 4000);
+}
+
+/* =========================================================================
+   Google Drive backup.
+   Syncing keeps the devices in step; this keeps a copy somewhere the company
+   owns outright. The free database plan takes no backups of its own, and a
+   file in your own Drive is also the way out if you ever leave this system.
+
+   The upload happens from the device, straight to Google. Nothing passes
+   through us, and the app asks only for `drive.file`, which lets it see the
+   files it created and nothing else in the Drive.
+   ========================================================================= */
+
+const DRIVE_KEY    = "environmsafe.drive";
+const DRIVE_FOLDER = "EnvironmSafe Backups";
+const DRIVE_KEEP   = 14;                 // how many daily copies to retain
+const DRIVE_EVERY  = 24 * 60 * 60 * 1000;
+const DRIVE_SCOPE  = "https://www.googleapis.com/auth/drive.file";
+/* Overridable so the suite can point the upload at a stand-in server. */
+let DRIVE_API = { files: "https://www.googleapis.com/drive/v3/files",
+                  upload: "https://www.googleapis.com/upload/drive/v3/files" };
+
+const blankDrive = () => ({ token:"", expiresAt:0, folderId:"", lastAt:"", lastFile:"" });
+let DRIVE = blankDrive();
+try { DRIVE = Object.assign(blankDrive(), JSON.parse(localStorage.getItem(DRIVE_KEY) || "null") || {}); }
+catch (e) { DRIVE = blankDrive(); }
+
+function driveSave() {
+  try { localStorage.setItem(DRIVE_KEY, JSON.stringify(DRIVE)); } catch (e) { /* full */ }
+}
+/* The client id belongs to the company, not the device, so it rides along with
+   the books and every other device is configured the moment it syncs. */
+const driveClientId = () => ((DB.meta && DB.meta.driveClientId) || "").trim();
+const driveReady    = () => !!DRIVE.token && Date.now() < DRIVE.expiresAt - 60000;
+const driveSetUp    = () => !!driveClientId();
+
+/* Google's sign-in library is fetched only when a backup is actually wanted,
+   so the system still opens with no connection at all. */
+function loadGoogle() {
+  if (window.google && google.accounts && google.accounts.oauth2) return Promise.resolve(true);
+  if (loadGoogle._p) return loadGoogle._p;
+  loadGoogle._p = new Promise(resolve => {
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload  = () => resolve(!!(window.google && google.accounts && google.accounts.oauth2));
+    s.onerror = () => resolve(false);
+    document.head.appendChild(s);
+    setTimeout(() => resolve(!!(window.google && google.accounts && google.accounts.oauth2)), 10000);
+  });
+  return loadGoogle._p;
+}
+
+/** An access token for Drive. `interactive` allows Google's consent window. */
+async function driveToken(interactive) {
+  if (driveReady()) return DRIVE.token;
+  if (!driveSetUp()) throw new Error("Google Drive is not set up yet.");
+  if (!(await loadGoogle())) throw new Error("Could not reach Google. Check the connection.");
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: driveClientId(),
+      scope: DRIVE_SCOPE,
+      callback: r => {
+        settled = true;
+        if (!r || !r.access_token) return reject(new Error("Google did not grant access."));
+        DRIVE.token = r.access_token;
+        DRIVE.expiresAt = Date.now() + ((Number(r.expires_in) || 3600) * 1000);
+        driveSave();
+        resolve(DRIVE.token);
+      },
+      error_callback: e => { settled = true;
+        reject(new Error((e && e.type === "popup_closed") ? "The Google window was closed."
+                                                          : "Google refused the request.")); }
+    });
+    // Without a gesture Google may only renew silently; that is what we want for
+    // the automatic daily copy, and why a failure here is not treated as fatal.
+    client.requestAccessToken({ prompt: interactive ? "consent" : "" });
+    setTimeout(() => { if (!settled) reject(new Error("Google did not answer in time.")); }, 60000);
+  });
+}
+
+async function driveFetch(url, opts) {
+  opts = opts || {};
+  const token = await driveToken(false);
+  const r = await fetch(url, Object.assign({}, opts, {
+    headers: Object.assign({ Authorization: "Bearer " + token }, opts.headers || {})
+  }));
+  const text = await r.text();
+  let body = null; try { body = text ? JSON.parse(text) : null; } catch (e) { body = { raw:text }; }
+  if (!r.ok) {
+    const msg = (body && body.error && (body.error.message || body.error)) || ("HTTP " + r.status);
+    const err = new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    err.status = r.status;
+    if (r.status === 401 || r.status === 403) { DRIVE.token = ""; driveSave(); }  // force a fresh grant
+    throw err;
+  }
+  return body;
+}
+
+/** The folder the copies live in, made once and remembered. */
+async function driveFolder() {
+  if (DRIVE.folderId) return DRIVE.folderId;
+  const q = encodeURIComponent(
+    `name='${DRIVE_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const found = await driveFetch(`${DRIVE_API.files}?q=${q}&fields=files(id,name)&pageSize=1`);
+  if (found && found.files && found.files.length) { DRIVE.folderId = found.files[0].id; driveSave(); return DRIVE.folderId; }
+  const made = await driveFetch(DRIVE_API.files + "?fields=id", {
+    method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ name: DRIVE_FOLDER, mimeType:"application/vnd.google-apps.folder" })
+  });
+  DRIVE.folderId = made.id; driveSave();
+  return DRIVE.folderId;
+}
+
+/** Old copies are removed so the folder does not grow without end. */
+async function drivePrune() {
+  const q = encodeURIComponent(`'${DRIVE.folderId}' in parents and trashed=false`);
+  const list = await driveFetch(
+    `${DRIVE_API.files}?q=${q}&fields=files(id,name,createdTime)&orderBy=createdTime desc&pageSize=100`);
+  const files = (list && list.files) || [];
+  let removed = 0;
+  for (const f of files.slice(DRIVE_KEEP)) {
+    try { await driveFetch(`${DRIVE_API.files}/${f.id}`, { method:"DELETE" }); removed++; }
+    catch (e) { /* a copy that will not delete is not worth failing the backup for */ }
+  }
+  return removed;
+}
+
+/** Writes the whole ledger into Drive as one file. */
+async function driveBackup(quiet) {
+  try {
+    if (!driveSetUp()) { if (!quiet) toast("Add the Google client id first."); return null; }
+    await driveToken(!quiet);                       // may open Google's window when asked by hand
+    const folder = await driveFolder();
+    const name = `environmsafe-${today()}-${new Date().toISOString().slice(11,16).replace(":","")}.json`;
+    const body = JSON.stringify(DB);
+    const boundary = "es" + Math.random().toString(36).slice(2);
+    const multipart =
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+      JSON.stringify({ name, parents:[folder], mimeType:"application/json" }) +
+      `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n` + body +
+      `\r\n--${boundary}--`;
+    const saved = await driveFetch(DRIVE_API.upload + "?uploadType=multipart&fields=id,name", {
+      method:"POST",
+      headers:{ "Content-Type": "multipart/related; boundary=" + boundary },
+      body: multipart
+    });
+    DRIVE.lastAt = new Date().toISOString();
+    DRIVE.lastFile = (saved && saved.name) || name;
+    driveSave();
+    const pruned = await drivePrune().catch(() => 0);
+    if (!quiet) toast("Backed up to Drive: " + DRIVE.lastFile + (pruned ? ` (${pruned} old copies removed)` : ""));
+    return { name: DRIVE.lastFile, pruned };
+  } catch (e) {
+    if (!quiet) toast(driveMessage(e));
+    return null;
+  }
+}
+
+/** One copy a day, taken quietly after the books have been put away. */
+function driveMaybeBackup() {
+  if (!driveSetUp()) return;
+  const last = DRIVE.lastAt ? Date.parse(DRIVE.lastAt) : 0;
+  if (Date.now() - last < DRIVE_EVERY) return;
+  driveBackup(true);
+}
+
+function driveMessage(e) {
+  const m = String((e && e.message) || "");
+  if (typeof navigator !== "undefined" && navigator.onLine === false)
+    return "No internet connection — the copy will be taken later.";
+  if (/not set up/i.test(m))        return "Add the Google client id under Backup & sync first.";
+  if (/window was closed/i.test(m)) return "The Google window was closed before access was given.";
+  if (/reach Google/i.test(m))      return "Could not reach Google. Check the connection.";
+  if (/insufficient|permission|denied/i.test(m))
+    return "Google refused: the app was not given permission to store files.";
+  return m || "The backup did not complete.";
+}
+
+/** The Google Drive card on Backup & sync. */
+function driveCard(m) {
+  const c = el("div", { class:"card" });
+  c.appendChild(el("h2", {}, "Copy to Google Drive"));
+  const note = el("p", { class:"card-note" },
+    "A copy of the whole ledger is written to your own Google Drive once a day, into a folder "
+    + "called <b>" + esc(DRIVE_FOLDER) + "</b>. It goes straight from this device to Google. "
+    + "The last " + DRIVE_KEEP + " copies are kept.");
+  const box = el("div");
+  c.appendChild(note); c.appendChild(box);
+
+  const draw = () => {
+    box.innerHTML = "";
+    if (!driveSetUp()) {
+      box.appendChild(el("p", { class:"card-note", style:"margin:.2rem 0 .5rem" },
+        "To switch this on, paste the Google client id for the company. It is created once, "
+        + "in the Google Cloud console, and then applies to every device."));
+      const g = el("div", { class:"grid" });
+      g.appendChild(fld("Google client id", '<input type="text" id="dr_id" placeholder="…apps.googleusercontent.com">'));
+      box.appendChild(g);
+      const b = el("button", { class:"btn gold", style:"margin-top:.5rem" }, "Save and connect");
+      b.onclick = async () => {
+        const v = ($("#dr_id").value || "").trim();
+        if (!v) return toast("Paste the client id first.");
+        if (!isAdmin()) return toast("Only an Administrator can set this up.");
+        DB.meta.driveClientId = v; save();
+        b.disabled = true;
+        const r = await driveBackup(false);
+        b.disabled = false;
+        draw();
+        if (r) render();
+      };
+      box.appendChild(b);
+      return;
+    }
+    const when = DRIVE.lastAt ? new Date(DRIVE.lastAt).toLocaleString() : "not yet";
+    box.appendChild(el("p", { style:"margin:.2rem 0 .5rem" },
+      '<span class="card-note">Last copy: ' + esc(when)
+      + (DRIVE.lastFile ? " &middot; " + esc(DRIVE.lastFile) : "") + "</span>"));
+    const bar = el("div", { style:"display:flex;gap:.5rem;flex-wrap:wrap" });
+    const bNow = el("button", { class:"btn gold" }, "Copy to Drive now");
+    bNow.onclick = async () => {
+      bNow.disabled = true; bNow.textContent = "Copying…";
+      await driveBackup(false);
+      bNow.disabled = false; bNow.textContent = "Copy to Drive now";
+      draw();
+    };
+    const bOff = el("button", { class:"btn ghost" }, "Stop copying");
+    bOff.onclick = () => {
+      if (!isAdmin()) return toast("Only an Administrator can change this.");
+      if (!confirm("Stop copying the ledger to Google Drive?\nCopies already in Drive are left alone.")) return;
+      delete DB.meta.driveClientId; save();
+      DRIVE = blankDrive(); driveSave();
+      draw(); toast("Copying to Drive is off. Nothing already in Drive was removed.");
+    };
+    bar.appendChild(bNow); bar.appendChild(bOff);
+    box.appendChild(bar);
+  };
+  draw();
+  m.appendChild(c);
 }
 
 /** The Cloud account card on Backup & sync. */
@@ -2928,6 +3170,7 @@ function viewData(m) {
   pageHead(m, t("data"), "Move data between the phones and computers of your 5 users");
 
   cloudCard(m);
+  driveCard(m);
 
   const c1 = el("div", { class:"card" });
   c1.innerHTML = `<h2>Backup</h2><p class="card-note">Writes one file containing every record.

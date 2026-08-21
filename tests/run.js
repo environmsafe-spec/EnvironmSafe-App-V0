@@ -12,7 +12,7 @@ const STATIC_PORT = Number(process.env.ES_TEST_PORT || 8921);
 const MOCK_PORT   = Number(process.env.ES_MOCK_PORT || 8922);
 const ACCOUNT     = { email: 'akram@environmsafe.com', password: 'Aden#2026' };
 
-const SUITES = ['./app.test', './identity.test', './print.test', './auth.test', './sync.test']
+const SUITES = ['./app.test', './identity.test', './print.test', './auth.test', './sync.test', './drive.test']
   .map(m => require(m));
 
 (async () => {
@@ -41,6 +41,7 @@ const SUITES = ['./app.test', './identity.test', './print.test', './auth.test', 
       cloudUrl: `http://127.0.0.1:${STATIC_PORT}/app-cloud.html`,
       account:  ACCOUNT,
       mock,
+      mockBase: mockUrl,
       check(name, ok, extra) {
         ok ? pass++ : fail++;
         if (!ok) failures.push(`${suite.name}: ${name}${extra ? '  (' + extra + ')' : ''}`);
