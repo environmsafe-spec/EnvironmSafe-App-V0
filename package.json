@@ -1,0 +1,12 @@
+{
+  "name": "environmsafe-procurement",
+  "version": "1.9.0",
+  "private": true,
+  "description": "EnvironmSafe procurement and financial management system",
+  "scripts": {
+    "test": "node tests/run.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.1"
+  }
+}
