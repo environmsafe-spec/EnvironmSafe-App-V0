@@ -30,8 +30,10 @@ const SUITES = ['./app.test', './identity.test', './print.test', './auth.test', 
   let pass = 0, fail = 0;
   const failures = [];
 
+  let ran = 0;
   for (const suite of SUITES) {
     if (only.length && !only.some(o => suite.name.includes(o))) continue;
+    ran++;
     console.log(`\n── ${suite.name} ──`);
     const ctx = {
       browser,
@@ -56,5 +58,15 @@ const SUITES = ['./app.test', './identity.test', './print.test', './auth.test', 
 
   console.log(`\n${pass} passed, ${fail} failed`);
   if (failures.length) { console.log('\nFailures:'); failures.forEach(f => console.log('  - ' + f)); }
+
+  // A run that checked nothing must never report success: an empty suite list, a
+  // filter matching no suite, or a suite that quietly stopped registering checks
+  // would otherwise show green and prove nothing.
+  if (!ran) {
+    console.error(only.length ? `\nNo suite matched: ${only.join(', ')}` : '\nNo suites are registered.');
+    process.exit(1);
+  }
+  if (pass + fail === 0) { console.error('\nNo checks ran.'); process.exit(1); }
+
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error('test runner failed:', e); process.exit(1); });
