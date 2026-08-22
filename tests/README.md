@@ -20,6 +20,7 @@ npm test -- sync     # only suites whose name contains "sync"
 | `cloud account` | Being signed out by a weak connection, an expired token not renewing, a session not surviving a restart, failures shown as HTTP codes instead of sentences |
 | `sync` | The point of the whole thing: a replacement phone signing in and recovering the ledger. Also deletions returning from the dead, and work done offline being lost |
 | `drive backup` | The copy the company owns outright going stale or absent: a folder made afresh every day, old copies never cleared, a token Google has refused being reused, and being offline looking like a failure of the books |
+| `columns` | A statement's optional columns not adding, removing or reordering; a choice not surviving a reload or leaking into a different report; Print and Excel drifting from what is actually on screen; the pinned date/balance ends being reorderable away |
 
 ## The stand-in server
 

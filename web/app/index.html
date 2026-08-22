@@ -1662,14 +1662,200 @@ function parseCsv(text) {
 
 let rep = { from:"", to:"", entity:"" };
 
+/* =========================================================================
+   Flexible report columns.
+   A statement or ledger can have columns added, removed and reordered. Date
+   (or the row's name, for a flat report) leads and, for a running-balance
+   report, the amount and balance columns stay at the end — remove those and
+   it would stop being that report. Everything between is the user's choice,
+   remembered on this device.
+   ========================================================================= */
+
+function partyCols(isCus) {
+  return {
+    lead: [ { id:"date", label:t("date"), num:false } ],
+    body: [
+      { id:"type",      label:t("type"), num:false, default:true },
+      { id:"ref",       label:t("ref"),  num:false, default:true },
+      { id:"case",      label:"Case",    num:false, default:true },
+      { id:"project",   label:"Project", num:false, default:false },
+      { id:"employee",  label:"Employee", num:false, default:false },
+      { id:"account",   label:"Bank / cash account", num:false, default:false },
+      { id:"category",  label:"Category", num:false, default:false },
+      { id:"item",      label:"Item",    num:false, default:false },
+      { id:"qty",       label:"Qty",     num:true,  default:false },
+      { id:"unitPrice", label:"Unit price", num:true, default:false },
+      { id:"discount",  label:"Discount", num:true, default:false },
+      { id:"docType",   label:"Document type", num:false, default:false },
+      { id:"docRef",    label:"Document file / link", num:false, default:false },
+      { id:"status",    label:"Status",  num:false, default:false },
+      { id:"notes",     label:"Notes",   num:false, default:false },
+    ],
+    tail: [
+      { id:"charge",  label: isCus ? "Invoiced" : "Billed", num:true },
+      { id:"settle",  label: isCus ? "Received / returned" : "Paid / returned", num:true },
+      { id:"balance", label:t("balance"), num:true },
+    ],
+  };
+}
+function bankCols() {
+  return {
+    lead: [ { id:"date", label:t("date"), num:false } ],
+    body: [
+      { id:"type",     label:t("type"), num:false, default:true },
+      { id:"ref",      label:t("ref"),  num:false, default:true },
+      { id:"party",    label:"Party",   num:false, default:true },
+      { id:"case",     label:"Case",    num:false, default:false },
+      { id:"project",  label:"Project", num:false, default:false },
+      { id:"employee", label:"Employee", num:false, default:false },
+      { id:"category", label:"Category", num:false, default:false },
+      { id:"docType",  label:"Document type", num:false, default:false },
+      { id:"docRef",   label:"Document file / link", num:false, default:false },
+      { id:"status",   label:"Status",  num:false, default:false },
+      { id:"notes",    label:"Notes",   num:false, default:false },
+    ],
+    tail: [
+      { id:"in",      label:"In",  num:true },
+      { id:"out",     label:"Out", num:true },
+      { id:"balance", label:t("balance"), num:true },
+    ],
+  };
+}
+function projectCols() {
+  return {
+    lead: [ { id:"name", label:"Project", num:false } ],
+    body: [
+      { id:"customer", label:"Customer", num:false, default:true },
+      { id:"status",   label:"Status",   num:false, default:true },
+      { id:"budget",   label:"Contract", num:true,  default:true },
+      { id:"revenue",  label:"Revenue",  num:true,  default:true },
+      { id:"cost",     label:"Cost",     num:true,  default:true },
+      { id:"profit",   label:"Profit",   num:true,  default:true },
+      { id:"margin",   label:"Margin",   num:true,  default:true },
+    ],
+    tail: [],
+  };
+}
+function employeeCols() {
+  return {
+    lead: [ { id:"name", label:"Employee", num:false } ],
+    body: [
+      { id:"position", label:"Position",       num:false, default:true },
+      { id:"salary",   label:"Monthly salary", num:true,  default:true },
+      { id:"paid",     label:"Salaries paid",  num:true,  default:true },
+      { id:"advances", label:"Advances",       num:true,  default:true },
+      { id:"net",      label:"Net",            num:true,  default:true },
+    ],
+    tail: [],
+  };
+}
+/** Built fresh on every call, never cached, so labels follow a language switch. */
+function reportCols(kind) {
+  if (kind === "customer") return partyCols(true);
+  if (kind === "supplier") return partyCols(false);
+  if (kind === "bank")     return bankCols();
+  if (kind === "project")  return projectCols();
+  if (kind === "employee") return employeeCols();
+  return null;
+}
+
+const colPrefsKey = reportId => "environmsafe.cols." + reportId;
+
+/** The saved choice for one report, or the registry defaults when nothing is saved. */
+function colPrefs(reportId, body) {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(colPrefsKey(reportId)) || "null"); } catch (e) { saved = null; }
+  const ids = body.map(c => c.id);
+  let order = (saved && Array.isArray(saved.order)) ? saved.order.filter(id => ids.includes(id)) : ids.slice();
+  ids.forEach(id => { if (!order.includes(id)) order.push(id); });   // a column added since prefs were saved
+  const visible = (saved && Array.isArray(saved.visible))
+    ? new Set(saved.visible.filter(id => ids.includes(id)))
+    : new Set(body.filter(c => c.default).map(c => c.id));
+  return { order, visible };
+}
+function colPrefsSave(reportId, order, visible) {
+  try { localStorage.setItem(colPrefsKey(reportId), JSON.stringify({ order, visible:[...visible] })); }
+  catch (e) { /* storage full: the choice just will not be remembered */ }
+}
+
+/** The optional columns to render, in the order and visibility the user chose. */
+function visibleBody(reportId, body) {
+  const p = colPrefs(reportId, body);
+  const byId = Object.fromEntries(body.map(c => [c.id, c]));
+  return p.order.filter(id => p.visible.has(id)).map(id => byId[id]);
+}
+
+const numAttr = c => c.num ? ' class="num"' : "";
+function headRow(cols) { return "<tr>" + cols.map(c => `<th${numAttr(c)}>${esc(c.label)}</th>`).join("") + "</tr>"; }
+function dataRow(cols, data) { return "<tr>" + cols.map(c => `<td${numAttr(c)}>${data[c.id] ?? ""}</td>`).join("") + "</tr>"; }
+
+/** The picker: tick columns on or off, move them with the arrows, Apply to redraw. */
+function openColumnPicker(reportId, title, body, onApply) {
+  const p = colPrefs(reportId, body);
+  let order = p.order.slice();
+  let visible = new Set(p.visible);
+  const byId = Object.fromEntries(body.map(c => [c.id, c]));
+
+  const bg = el("div", { class:"modal-bg" });
+  const box = el("div", { class:"modal" });
+  box.appendChild(el("h2", {}, "Columns — " + esc(title)));
+  box.appendChild(el("p", { class:"card-note", style:"margin:-.4rem 0 .7rem" },
+    "Date and the balance always show. Choose and order the rest."));
+  const list = el("div");
+  box.appendChild(list);
+
+  const move = (id, dir) => {
+    const i = order.indexOf(id), j = i + dir;
+    if (j < 0 || j >= order.length) return;
+    const t2 = order[i]; order[i] = order[j]; order[j] = t2;
+    draw();
+  };
+  const draw = () => {
+    list.innerHTML = "";
+    order.forEach((id, i) => {
+      const c = byId[id]; if (!c) return;
+      const row = el("div", { style:"display:flex;align-items:center;gap:.5rem;padding:.3rem 0;border-bottom:1px solid var(--line-2)" });
+      const cb = el("input", { type:"checkbox" }); cb.checked = visible.has(id);
+      cb.onchange = () => { cb.checked ? visible.add(id) : visible.delete(id); };
+      row.appendChild(cb);
+      row.appendChild(el("span", { style:"flex:1" }, esc(c.label)));
+      const up = el("button", { type:"button", class:"btn ghost sm" }, "↑");
+      up.disabled = i === 0; up.onclick = () => move(id, -1);
+      const dn = el("button", { type:"button", class:"btn ghost sm" }, "↓");
+      dn.disabled = i === order.length - 1; dn.onclick = () => move(id, 1);
+      row.appendChild(up); row.appendChild(dn);
+      list.appendChild(row);
+    });
+  };
+  draw();
+
+  const act = el("div", { class:"actions" });
+  const reset = el("button", { class:"btn ghost", type:"button" }, "Reset to default");
+  reset.onclick = () => { order = body.map(c => c.id);
+    visible = new Set(body.filter(c => c.default).map(c => c.id)); draw(); };
+  const cancel = el("button", { class:"btn ghost", type:"button" }, t("cancel"));
+  cancel.onclick = () => bg.remove();
+  const apply = el("button", { class:"btn gold", type:"button" }, "Apply");
+  apply.onclick = () => { colPrefsSave(reportId, order, visible); bg.remove(); onApply(); };
+  act.appendChild(reset); act.appendChild(cancel); act.appendChild(apply);
+  box.appendChild(act);
+  bg.appendChild(box);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  document.body.appendChild(bg);
+}
+
 function viewReport(m, kind) {
   const titles = { summary:t("r_summary"), customer:t("r_customer"), supplier:t("r_supplier"),
                    project:t("r_project"), employee:t("r_employee"), bank:t("r_bank"),
                    item:t("r_item"), asset:t("r_asset"), document:t("r_document") };
-  pageHead(m, titles[kind], CO().name, [
+  const flexCols = reportCols(kind);
+  const actions = [
     { label:t("print"), cls:"gold", on:() => doPrint(titles[kind]) },
     { label:"Download Excel", on:() => reportToXlsx(titles[kind]) }
-  ]);
+  ];
+  if (flexCols) actions.push({ label:"Columns",
+    on:() => openColumnPicker(kind, titles[kind], flexCols.body, render) });
+  pageHead(m, titles[kind], CO().name, actions);
   // official documents carry their own letterhead
   if (kind !== "document") printHeader(m, titles[kind], `${rep.from || "start"} → ${rep.to || today()}`);
 
@@ -2376,6 +2562,9 @@ function repSummary(m) {
 
 function repParty(m, tbl) {
   const isCus = tbl === "customers";
+  const kind = isCus ? "customer" : "supplier";
+  const cols = reportCols(kind);
+  const allCols = [...cols.lead, ...visibleBody(kind, cols.body), ...cols.tail];
   const list = rep.entity ? [byId(tbl, rep.entity)].filter(Boolean) : rowsOf(tbl);
   if (!list.length) { m.appendChild(el("div", { class:"card" }, `<div class="empty">${esc(t("none"))}</div>`)); return; }
   list.forEach(p => {
@@ -2396,35 +2585,53 @@ function repParty(m, tbl) {
       const amt = amountOf(x);
       run += up ? amt : -amt;
       const ret = isSalesReturn(x) || isPurchaseReturn(x);
-      return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}${
-          ret && x.againstRef ? ` <small>vs ${esc(x.againstRef)}</small>` : ""}</td>
-        <td>${esc(x.refNo || "")}</td>
-        <td>${esc(x.caseNo || "")}</td>
-        <td class="num">${up ? fmt(amt) : ""}</td><td class="num">${up ? "" : fmt(amt)}</td>
-        <td class="num">${fmt(run)}</td></tr>`;
+      const data = {
+        date: esc(x.date),
+        type: esc(x.type) + (ret && x.againstRef ? ` <small>vs ${esc(x.againstRef)}</small>` : ""),
+        ref: esc(x.refNo || ""),
+        case: esc(x.caseNo || ""),
+        project: esc(nameOf("projects", x.projectId)),
+        employee: esc(nameOf("employees", x.employeeId)),
+        account: esc(nameOf("accounts", x.accountId)),
+        category: esc(nameOf("categories", x.categoryId)),
+        item: esc(nameOf("items", x.itemId)),
+        qty: x.qty ? fmt(x.qty) : "",
+        unitPrice: x.unitPrice ? fmt(x.unitPrice) : "",
+        discount: x.discount ? fmt(x.discount) : "",
+        docType: esc(x.docType || ""),
+        docRef: esc(x.docRef || ""),
+        status: esc(x.status || ""),
+        notes: esc(x.notes || ""),
+        charge: up ? fmt(amt) : "",
+        settle: up ? "" : fmt(amt),
+        balance: fmt(run),
+      };
+      return dataRow(allCols, data);
     }).join("");
     const card = el("div", { class:"card" });
     card.appendChild(el("h2", {}, esc(p.nameEn) + (p.nameAr ? " — " + p.nameAr : "")));
     card.appendChild(el("div", { class:"card-note" },
       `${esc(p.phone || "")} ${esc(p.email || "")} · ${esc(t("opening"))}: ${fmt(opening)}`));
     const w = el("div", { class:"tablewrap" }); w.style.marginTop = ".6rem";
-    w.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
-      <th>${esc(t("ref"))}</th><th>Case</th>
-      <th class="num">${isCus ? "Invoiced" : "Billed"}</th>
-      <th class="num">${isCus ? "Received / returned" : "Paid / returned"}</th>
-      <th class="num">${esc(t("balance"))}</th></tr></thead>
-      <tbody><tr><td colspan="6">${esc(t("opening"))}</td><td class="num">${fmt(opening)}</td></tr>
-      ${body || ""}</tbody>
-      <tfoot><tr><td colspan="4">${esc(t("closing"))}</td>
-        <td class="num">${fmt(sum(period.filter(charge), amountOf))}</td>
-        <td class="num">${fmt(sum(period.filter(settle), amountOf))}</td>
-        <td class="num">${fmt(run)}</td></tr></tfoot></table>`;
+    const openingRow = `<tr><td colspan="${allCols.length - 1}">${esc(t("opening"))}</td><td class="num">${fmt(opening)}</td></tr>`;
+    const closeRow = `<tr><td colspan="${allCols.length - cols.tail.length}">${esc(t("closing"))}</td>` +
+      cols.tail.map(c => {
+        if (c.id === "charge")  return `<td class="num">${fmt(sum(period.filter(charge), amountOf))}</td>`;
+        if (c.id === "settle")  return `<td class="num">${fmt(sum(period.filter(settle), amountOf))}</td>`;
+        if (c.id === "balance") return `<td class="num">${fmt(run)}</td>`;
+        return "<td></td>";
+      }).join("") + "</tr>";
+    w.innerHTML = `<table><thead>${headRow(allCols)}</thead>
+      <tbody>${openingRow}${body || ""}</tbody>
+      <tfoot>${closeRow}</tfoot></table>`;
     card.appendChild(w);
     m.appendChild(card);
   });
 }
 
 function repProject(m) {
+  const cols = reportCols("project");
+  const allCols = [...cols.lead, ...visibleBody("project", cols.body)];
   const list = rep.entity ? [byId("projects", rep.entity)].filter(Boolean) : rowsOf("projects");
   const w = el("div", { class:"tablewrap" });
   if (!list.length) { w.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; m.appendChild(w); return; }
@@ -2432,18 +2639,18 @@ function repProject(m) {
     const l = txs({ projectId:p.id, from:rep.from, to:rep.to });
     const rev = netRevenue(l), cst = netCost(l);
     const margin = rev ? ((rev - cst) / rev * 100) : 0;
-    return `<tr><td>${esc(p.nameEn)}</td><td>${esc(nameOf("customers", p.customerId))}</td>
-      <td>${esc(p.status || "")}</td><td class="num">${fmt(p.budget)}</td>
-      <td class="num">${fmt(rev)}</td><td class="num">${fmt(cst)}</td>
-      <td class="num">${fmt(rev - cst)}</td><td class="num">${margin.toFixed(1)}%</td></tr>`;
+    const data = { name: esc(p.nameEn), customer: esc(nameOf("customers", p.customerId)),
+      status: esc(p.status || ""), budget: fmt(p.budget), revenue: fmt(rev), cost: fmt(cst),
+      profit: fmt(rev - cst), margin: margin.toFixed(1) + "%" };
+    return dataRow(allCols, data);
   }).join("");
-  w.innerHTML = `<table><thead><tr><th>Project</th><th>Customer</th><th>Status</th>
-    <th class="num">Contract</th><th class="num">Revenue</th><th class="num">Cost</th>
-    <th class="num">Profit</th><th class="num">Margin</th></tr></thead><tbody>${rows}</tbody></table>`;
+  w.innerHTML = `<table><thead>${headRow(allCols)}</thead><tbody>${rows}</tbody></table>`;
   m.appendChild(w);
 }
 
 function repEmployee(m) {
+  const cols = reportCols("employee");
+  const allCols = [...cols.lead, ...visibleBody("employee", cols.body)];
   const list = rep.entity ? [byId("employees", rep.entity)].filter(Boolean) : rowsOf("employees");
   const w = el("div", { class:"tablewrap" });
   if (!list.length) { w.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; m.appendChild(w); return; }
@@ -2451,17 +2658,17 @@ function repEmployee(m) {
     const l = txs({ employeeId:e.id, from:rep.from, to:rep.to });
     const sal = sum(l.filter(x => x.type === "SALARY"), amountOf);
     const adv = sum(l.filter(x => x.type === "ADVANCE TO EMPLOYEE"), amountOf);
-    return `<tr><td>${esc(e.nameEn)}</td><td>${esc(e.position || "")}</td>
-      <td class="num">${fmt(e.salary)}</td><td class="num">${fmt(sal)}</td>
-      <td class="num">${fmt(adv)}</td><td class="num">${fmt(sal - adv)}</td></tr>`;
+    const data = { name: esc(e.nameEn), position: esc(e.position || ""), salary: fmt(e.salary),
+      paid: fmt(sal), advances: fmt(adv), net: fmt(sal - adv) };
+    return dataRow(allCols, data);
   }).join("");
-  w.innerHTML = `<table><thead><tr><th>Employee</th><th>Position</th><th class="num">Monthly salary</th>
-    <th class="num">Salaries paid</th><th class="num">Advances</th><th class="num">Net</th>
-    </tr></thead><tbody>${rows}</tbody></table>`;
+  w.innerHTML = `<table><thead>${headRow(allCols)}</thead><tbody>${rows}</tbody></table>`;
   m.appendChild(w);
 }
 
 function repBank(m) {
+  const cols = reportCols("bank");
+  const allCols = [...cols.lead, ...visibleBody("bank", cols.body), ...cols.tail];
   const list = rep.entity ? [byId("accounts", rep.entity)].filter(Boolean) : curAccounts();
   list.forEach(a => {
     const all = txs({ accountId:a.id });
@@ -2472,22 +2679,30 @@ function repBank(m) {
     const body = period.map(x => {
       const inn = isCashIn(x), amt = amountOf(x);
       run += inn ? amt : -amt;
-      return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}</td><td>${esc(x.refNo || "")}</td>
-        <td>${esc(nameOf("customers",x.customerId) || nameOf("suppliers",x.supplierId) || nameOf("employees",x.employeeId) || "")}</td>
-        <td class="num">${inn ? fmt(amt) : ""}</td><td class="num">${inn ? "" : fmt(amt)}</td>
-        <td class="num">${fmt(run)}</td></tr>`;
+      const data = {
+        date: esc(x.date), type: esc(x.type), ref: esc(x.refNo || ""),
+        party: esc(nameOf("customers",x.customerId) || nameOf("suppliers",x.supplierId) || nameOf("employees",x.employeeId) || ""),
+        case: esc(x.caseNo || ""), project: esc(nameOf("projects", x.projectId)),
+        employee: esc(nameOf("employees", x.employeeId)), category: esc(nameOf("categories", x.categoryId)),
+        docType: esc(x.docType || ""), docRef: esc(x.docRef || ""), status: esc(x.status || ""),
+        notes: esc(x.notes || ""), in: inn ? fmt(amt) : "", out: inn ? "" : fmt(amt), balance: fmt(run),
+      };
+      return dataRow(allCols, data);
     }).join("");
     const card = el("div", { class:"card" });
     card.appendChild(el("h2", {}, esc(a.nameEn) + " — " + esc(a.kind || "") + (a.bank && a.bank !== "—" ? " · " + esc(a.bank) : "")));
     const w = el("div", { class:"tablewrap" });
-    w.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
-      <th>${esc(t("ref"))}</th><th>Party</th><th class="num">In</th><th class="num">Out</th>
-      <th class="num">${esc(t("balance"))}</th></tr></thead>
-      <tbody><tr><td colspan="6">${esc(t("opening"))}</td><td class="num">${fmt(opening)}</td></tr>${body}</tbody>
-      <tfoot><tr><td colspan="4">${esc(t("closing"))}</td>
-        <td class="num">${fmt(sum(period.filter(isCashIn), amountOf))}</td>
-        <td class="num">${fmt(sum(period.filter(isCashOut), amountOf))}</td>
-        <td class="num">${fmt(run)}</td></tr></tfoot></table>`;
+    const openingRow = `<tr><td colspan="${allCols.length - 1}">${esc(t("opening"))}</td><td class="num">${fmt(opening)}</td></tr>`;
+    const closeRow = `<tr><td colspan="${allCols.length - cols.tail.length}">${esc(t("closing"))}</td>` +
+      cols.tail.map(c => {
+        if (c.id === "in")      return `<td class="num">${fmt(sum(period.filter(isCashIn), amountOf))}</td>`;
+        if (c.id === "out")     return `<td class="num">${fmt(sum(period.filter(isCashOut), amountOf))}</td>`;
+        if (c.id === "balance") return `<td class="num">${fmt(run)}</td>`;
+        return "<td></td>";
+      }).join("") + "</tr>";
+    w.innerHTML = `<table><thead>${headRow(allCols)}</thead>
+      <tbody>${openingRow}${body}</tbody>
+      <tfoot>${closeRow}</tfoot></table>`;
     card.appendChild(w);
     m.appendChild(card);
   });
