@@ -1661,6 +1661,11 @@ function parseCsv(text) {
    ========================================================================= */
 
 let rep = { from:"", to:"", entity:"" };
+// Which report "entity" was last chosen for. Switching to a different report —
+// via the sidebar, not its own Run button — must not carry a stale selection
+// with it: a customer picked on the statement silently filtered the asset
+// register to nothing, with no error, just "0 assets".
+let repEntityKind = "";
 
 /* =========================================================================
    Flexible report columns.
@@ -1749,6 +1754,53 @@ function employeeCols() {
     tail: [],
   };
 }
+function itemsCols() {
+  return {
+    lead: [ { id:"code", label:"Code", num:false }, { id:"desc", label:"Description", num:false } ],
+    body: [
+      { id:"type",      label:"Type",             num:false, default:true },
+      { id:"unit",      label:"Unit",             num:false, default:true },
+      { id:"category",  label:"Group",            num:false, default:false },
+      { id:"quoted",    label:"Quoted",           num:true,  default:true },
+      { id:"qSold",     label:"Qty sold",         num:true,  default:true },
+      { id:"rev",       label:"Sales value",      num:true,  default:true },
+      { id:"avg",       label:"Avg price",        num:true,  default:true },
+      { id:"qBought",   label:"Qty bought",       num:true,  default:true },
+      { id:"cost",      label:"Purchase value",   num:true,  default:true },
+      { id:"salePrice", label:"Catalogue selling price",  num:true, default:false },
+      { id:"costPrice", label:"Catalogue purchase price", num:true, default:false },
+      { id:"profit",    label:"Margin",           num:true,  default:true },
+      { id:"notes",     label:"Specification / notes", num:false, default:false },
+    ],
+    tail: [],
+  };
+}
+function assetsCols() {
+  return {
+    lead: [ { id:"tag", label:"Tag", num:false }, { id:"name", label:"Asset", num:false } ],
+    body: [
+      { id:"category",   label:"Category",           num:false, default:true },
+      { id:"location",   label:"Location",           num:false, default:true },
+      { id:"custodian",  label:"Custodian",          num:false, default:true },
+      { id:"acquired",   label:"Acquired",           num:false, default:true },
+      { id:"source",     label:"Source",             num:false, default:true },
+      { id:"cost",       label:"Cost",               num:true,  default:true },
+      { id:"life",       label:"Life",               num:true,  default:true },
+      { id:"period",     label:"Depn. period",       num:true,  default:true },
+      { id:"accumulated",label:"Accumulated",        num:true,  default:true },
+      { id:"nbv",        label:"Net book value",     num:true,  default:true },
+      { id:"status",     label:"Status",             num:false, default:true },
+      { id:"nameAr",     label:"Asset name (Arabic)",num:false, default:false },
+      { id:"item",       label:"Catalogue item",     num:false, default:false },
+      { id:"serial",     label:"Serial / chassis / plate no", num:false, default:false },
+      { id:"supplier",   label:"Supplier",           num:false, default:false },
+      { id:"qty",        label:"Quantity",           num:true,  default:false },
+      { id:"salvage",    label:"Residual value",     num:true,  default:false },
+      { id:"method",     label:"Depreciation method",num:false, default:false },
+    ],
+    tail: [],
+  };
+}
 /** Built fresh on every call, never cached, so labels follow a language switch. */
 function reportCols(kind) {
   if (kind === "customer") return partyCols(true);
@@ -1756,6 +1808,8 @@ function reportCols(kind) {
   if (kind === "bank")     return bankCols();
   if (kind === "project")  return projectCols();
   if (kind === "employee") return employeeCols();
+  if (kind === "item")     return itemsCols();
+  if (kind === "asset")    return assetsCols();
   return null;
 }
 
@@ -1788,6 +1842,15 @@ function visibleBody(reportId, body) {
 const numAttr = c => c.num ? ' class="num"' : "";
 function headRow(cols) { return "<tr>" + cols.map(c => `<th${numAttr(c)}>${esc(c.label)}</th>`).join("") + "</tr>"; }
 function dataRow(cols, data) { return "<tr>" + cols.map(c => `<td${numAttr(c)}>${data[c.id] ?? ""}</td>`).join("") + "</tr>"; }
+/** A totals row for a flat register: the label spans the pinned lead columns,
+    then one cell per remaining column — a sum where `sums` has one, blank
+    otherwise — in whatever order the user has currently chosen. */
+function footRow(cols, leadCount, sums) {
+  const rest = cols.slice(leadCount);
+  return `<tr><td colspan="${leadCount}">${esc(t("total"))}</td>` +
+    rest.map(c => sums[c.id] != null ? `<td class="num">${fmt(sums[c.id])}</td>` : "<td></td>").join("") +
+    "</tr>";
+}
 
 /** The picker: tick columns on or off, move them with the arrows, Apply to redraw. */
 function openColumnPicker(reportId, title, body, onApply) {
@@ -1845,6 +1908,7 @@ function openColumnPicker(reportId, title, body, onApply) {
 }
 
 function viewReport(m, kind) {
+  if (kind !== repEntityKind) { rep = Object.assign({}, rep, { entity:"" }); repEntityKind = kind; }
   const titles = { summary:t("r_summary"), customer:t("r_customer"), supplier:t("r_supplier"),
                    project:t("r_project"), employee:t("r_employee"), bank:t("r_bank"),
                    item:t("r_item"), asset:t("r_asset"), document:t("r_document") };
@@ -2225,27 +2289,25 @@ function repAssets(m) {
   kpi("Net book value", fmt0(totals.nbv), "cost − accumulated");
   m.appendChild(kpis);
 
+  const cols = reportCols("asset");
+  const allCols = [...cols.lead, ...visibleBody("asset", cols.body)];
   const w = el("div", { class:"tablewrap" });
   w.style.marginTop = "1rem";
-  w.innerHTML = `<table><thead><tr>
-    <th>Tag</th><th>Asset</th><th>Category</th><th>Location</th><th>Custodian</th>
-    <th>Acquired</th><th>Source</th><th class="num">Cost</th><th class="num">Life</th>
-    <th class="num">Depn. period</th><th class="num">Accumulated</th><th class="num">Net book value</th>
-    <th>Status</th></tr></thead><tbody>${
-    list.map(a => `<tr>
-      <td>${esc(a.tag || a.id)}</td><td>${esc(a.nameEn)}</td><td>${esc(a.category || "")}</td>
-      <td>${esc(a.location || "")}</td><td>${esc(nameOf("employees", a.custodianId))}</td>
-      <td>${esc(a.acquiredOn || "")}</td><td>${esc(a.source || "")}</td>
-      <td class="num">${fmt(a.cost)}</td><td class="num">${a.lifeYears ? a.lifeYears + "y" : "—"}</td>
-      <td class="num">${fmt(depnInPeriod(a, rep.from, upto))}</td>
-      <td class="num">${fmt(accumDepn(a, upto))}</td>
-      <td class="num">${fmt(netBookValue(a, upto))}</td>
-      <td><span class="pill ${assetLive(a) ? "approved" : "closed"}">${esc(a.status || "")}</span></td>
-    </tr>`).join("")}</tbody>
-    <tfoot><tr><td colspan="7">${esc(t("total"))}</td>
-      <td class="num">${fmt(totals.cost)}</td><td></td>
-      <td class="num">${fmt(totals.period)}</td><td class="num">${fmt(totals.accum)}</td>
-      <td class="num">${fmt(totals.nbv)}</td><td></td></tr></tfoot></table>`;
+  const bodyRows = list.map(a => dataRow(allCols, {
+    tag: esc(a.tag || a.id), name: esc(a.nameEn), category: esc(a.category || ""),
+    location: esc(a.location || ""), custodian: esc(nameOf("employees", a.custodianId)),
+    acquired: esc(a.acquiredOn || ""), source: esc(a.source || ""), cost: fmt(a.cost),
+    life: a.lifeYears ? a.lifeYears + "y" : "—",
+    period: fmt(depnInPeriod(a, rep.from, upto)), accumulated: fmt(accumDepn(a, upto)),
+    nbv: fmt(netBookValue(a, upto)),
+    status: `<span class="pill ${assetLive(a) ? "approved" : "closed"}">${esc(a.status || "")}</span>`,
+    nameAr: esc(a.nameAr || ""), item: esc(nameOf("items", a.itemId)), serial: esc(a.serial || ""),
+    supplier: esc(nameOf("suppliers", a.supplierId)), qty: a.qty ? fmt(a.qty) : "",
+    salvage: a.salvage ? fmt(a.salvage) : "", method: esc(a.method || ""),
+  })).join("");
+  const sums = { cost: totals.cost, period: totals.period, accumulated: totals.accum, nbv: totals.nbv };
+  w.innerHTML = `<table><thead>${headRow(allCols)}</thead><tbody>${bodyRows}</tbody>
+    <tfoot>${footRow(allCols, cols.lead.length, sums)}</tfoot></table>`;
   m.appendChild(w);
 
   /* by category */
@@ -2282,6 +2344,8 @@ function repItems(m) {
       then choose one on each quotation, purchase or invoice line.</div>`));
     return;
   }
+  const cols = reportCols("item");
+  const allCols = [...cols.lead, ...visibleBody("item", cols.body)];
   const period = txs({ from:rep.from, to:rep.to });
   const rows = list.map(it => {
     const mine = period.filter(x => x.itemId === it.id);
@@ -2299,23 +2363,18 @@ function repItems(m) {
              avg: qSold ? rev / qSold : 0, profit: rev - cost };
   });
   const w = el("div", { class:"tablewrap" });
-  w.innerHTML = `<table><thead><tr>
-    <th>Code</th><th>Description</th><th>Type</th><th>Unit</th>
-    <th class="num">Quoted</th><th class="num">Qty sold</th><th class="num">Sales value</th>
-    <th class="num">Avg price</th><th class="num">Qty bought</th><th class="num">Purchase value</th>
-    <th class="num">Margin</th></tr></thead><tbody>${
-    rows.map(r => `<tr>
-      <td>${esc(r.it.code || "")}</td><td>${esc(r.it.nameEn)}</td>
-      <td>${esc(r.it.kind || "")}</td><td>${esc(r.it.unit || "")}</td>
-      <td class="num">${r.quoted || ""}</td>
-      <td class="num">${r.qSold ? fmt(r.qSold) : ""}</td><td class="num">${fmt(r.rev)}</td>
-      <td class="num">${r.avg ? fmt(r.avg) : ""}</td>
-      <td class="num">${r.qBought ? fmt(r.qBought) : ""}</td><td class="num">${fmt(r.cost)}</td>
-      <td class="num">${fmt(r.profit)}</td></tr>`).join("")
-    }</tbody><tfoot><tr><td colspan="6">${esc(t("total"))}</td>
-      <td class="num">${fmt(rows.reduce((s,r) => s + r.rev, 0))}</td><td></td><td></td>
-      <td class="num">${fmt(rows.reduce((s,r) => s + r.cost, 0))}</td>
-      <td class="num">${fmt(rows.reduce((s,r) => s + r.profit, 0))}</td></tr></tfoot></table>`;
+  const bodyRows = rows.map(r => dataRow(allCols, {
+    code: esc(r.it.code || ""), desc: esc(r.it.nameEn), type: esc(r.it.kind || ""),
+    unit: esc(r.it.unit || ""), category: esc(r.it.category || ""),
+    quoted: r.quoted || "", qSold: r.qSold ? fmt(r.qSold) : "", rev: fmt(r.rev),
+    avg: r.avg ? fmt(r.avg) : "", qBought: r.qBought ? fmt(r.qBought) : "", cost: fmt(r.cost),
+    salePrice: r.it.salePrice ? fmt(r.it.salePrice) : "", costPrice: r.it.costPrice ? fmt(r.it.costPrice) : "",
+    profit: fmt(r.profit), notes: esc(r.it.notes || ""),
+  })).join("");
+  const sums = { rev: rows.reduce((s,r) => s + r.rev, 0), cost: rows.reduce((s,r) => s + r.cost, 0),
+                 profit: rows.reduce((s,r) => s + r.profit, 0) };
+  w.innerHTML = `<table><thead>${headRow(allCols)}</thead><tbody>${bodyRows}</tbody>
+    <tfoot>${footRow(allCols, cols.lead.length, sums)}</tfoot></table>`;
   m.appendChild(w);
 
   /* movement detail for a single selected item */

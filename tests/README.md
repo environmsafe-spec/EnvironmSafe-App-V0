@@ -21,6 +21,8 @@ npm test -- sync     # only suites whose name contains "sync"
 | `sync` | The point of the whole thing: a replacement phone signing in and recovering the ledger. Also deletions returning from the dead, and work done offline being lost |
 | `drive backup` | The copy the company owns outright going stale or absent: a folder made afresh every day, old copies never cleared, a token Google has refused being reused, and being offline looking like a failure of the books |
 | `columns` | A statement's optional columns not adding, removing or reordering; a choice not surviving a reload or leaking into a different report; Print and Excel drifting from what is actually on screen; the pinned date/balance ends being reorderable away |
+| `columns (items & assets)` | The same, extended to the Item/service report and Asset register — a flat register with totals that are not contiguous with any fixed trailing block, so a footer sum landing under the wrong column once columns move |
+| `report entity does not leak` | A specific customer, asset, project or account chosen on one report silently filtering an unrelated one down to nothing — found while testing this feature, not something it introduced, but exactly the kind of thing this suite exists to catch |
 
 ## The stand-in server
 
