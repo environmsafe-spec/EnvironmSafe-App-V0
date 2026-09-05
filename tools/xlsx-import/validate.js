@@ -2,7 +2,7 @@
 const fs=require('fs'); const db=JSON.parse(fs.readFileSync('environmsafe-import.json','utf8'));
 const T=[["INVOICE OUT","credit","revenue"],["RECEIPT","credit","cash_in"],
  ["EXPENSE","debit","cost_cash_out"],["SALARY","debit","cost_cash_out"],
- ["OWNER DRAWINGS","debit","cash_out"],["TRANSFER IN","credit","cash_in"],
+ ["OWNER DRAWINGS","debit","cash_out"],["ADVANCE TO EMPLOYEE","debit","cash_out"],["TRANSFER IN","credit","cash_in"],
  ["TRANSFER OUT","debit","cash_out"],["DEPOSIT PAID","debit","cash_out"],
  ["DEPOSIT RETURNED","credit","cash_in"]];
 const flow=t=>(T.find(x=>x[0]===t)||[])[2]||"";
@@ -79,3 +79,8 @@ console.log("  cash in  "+F(isCashIn).toLocaleString(undefined,{maximumFractionD
 console.log("  cash out "+F(isCashOut).toLocaleString(undefined,{maximumFractionDigits:0}).padStart(12));
 const missing=db.transactions.filter(x=>!(+x.fxRate>0)).length;
 console.log("  rows with no rate: "+missing);
+
+const known=new Set(T.map(x=>x[0]));
+const strangers=[...new Set(db.transactions.map(x=>x.type))].filter(t=>!known.has(t));
+console.log(strangers.length ? "\n!! types this check does not model: "+strangers.join(", ")
+                             : "\nevery transaction type is modelled by this check");

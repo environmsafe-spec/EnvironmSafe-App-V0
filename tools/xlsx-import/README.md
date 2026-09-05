@@ -54,6 +54,14 @@ are cash accounts like any other: money is transferred in, spent out, and
 whatever remains is the box's balance, visible on the bank & cash report next to
 the banks.
 
+**A DEBIT is a drawing for the owners and a loan for everyone else.** Money
+handed to Akram or Hayel is theirs to take: `OWNER DRAWINGS`. Money handed to any
+other employee is money the company expects back, so it is recorded as
+`ADVANCE TO EMPLOYEE` — it moves cash but is not a cost, and it stays visible on
+that employee's report until it is returned. A DEBIT naming nobody is not a
+drawing by anyone; in this workbook it is a card charge that was reversed, and it
+is treated as the movement its matching leg says it is.
+
 **One spelling per party.** `Al Zailee` and `Al  Zailee` are the same customer
 and merge. `AL ZAILEE-ADEN` is a different customer and keeps its own record.
 

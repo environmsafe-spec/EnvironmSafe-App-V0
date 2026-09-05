@@ -93,6 +93,59 @@ async function run(ctx) {
   check('replacing the books leaves only the incoming rows',
         after.txs === 1 && after.first === 'TRX-9001', `${before.txs} → ${after.txs}`);
 
+  /* ---- a statement never mixes currencies ---- */
+  // One customer, money in two currencies. Asked for "all currencies", the
+  // statement must come out as two statements, not one impossible total.
+  await pg.evaluate(() => {
+    DB.customers.push({ id: 'CUS-T1', uid: 'cus-t1', nameEn: 'Two Currency Co', opening: 0 });
+    const base = { id: '', uid: '', date: '2026-03-03', type: 'INVOICE OUT', phase: 'INVOICE OUT',
+      caseNo: '', customerId: 'CUS-T1', supplierId: '', employeeId: '', projectId: '',
+      accountId: '', categoryId: '', itemId: '', qty: 0, unitPrice: 0, discount: 0,
+      isAsset: 'No', debit: 0, status: 'Approved', refNo: '', againstRef: '', docType: '',
+      docRef: '', notes: '', updatedAt: new Date().toISOString() };
+    DB.transactions.push(Object.assign({}, base, { id: nextId('TRX'), uid: newUid(),
+      currency: 'USD', fxRate: 1, credit: 200 }));
+    DB.transactions.push(Object.assign({}, base, { id: nextId('TRX'), uid: newUid(),
+      currency: 'SAR', fxRate: 4, credit: 800 }));
+    DB.meta.fx = { USD: 1, SAR: 4, YER: 500 };
+    save();
+  });
+
+  const closings = async () => {
+    await pg.waitForTimeout(500);
+    return pg.evaluate(() => {
+      const blocks = [...document.querySelectorAll('.cur-block')];
+      const read = root => [...root.querySelectorAll('tfoot td')].map(x => x.textContent.trim());
+      return blocks.length
+        ? blocks.map(b => ({ cur: b.querySelector('.cur-head').textContent, foot: read(b) }))
+        : [{ cur: '', foot: read(document) }];
+    });
+  };
+
+  await pg.goto(ctx.appUrl + '#/r_customer'); await pg.waitForTimeout(800);
+  await pg.selectOption('#r_ent', 'CUS-T1');
+  await pg.locator('button:has-text("Run")').click(); await pg.waitForTimeout(600);
+
+  await pg.selectOption('#curSel', '');
+  const all = await closings();
+  check('with no currency picked the statement splits into one section per currency',
+        all.length === 2 && all.every(b => b.cur), JSON.stringify(all.map(b => b.cur)));
+  const usd = all.find(b => b.cur === 'USD'), sar = all.find(b => b.cur === 'SAR');
+  check('each section closes on its own money, never a mixed total',
+        usd && sar && usd.foot.join().includes('200.00') && sar.foot.join().includes('800.00'),
+        JSON.stringify(all));
+
+  await pg.selectOption('#curSel', 'SAR');
+  const one = await closings();
+  check('picking one currency prints that statement alone',
+        one.length === 1 && one[0].foot.join().includes('800.00'), JSON.stringify(one));
+
+  await pg.selectOption('#curSel', 'USD*');
+  const conv = await closings();
+  // 200 USD + 800 SAR at 4 to the dollar = 400 USD, in one section.
+  check('the converted statement is a single section in USD',
+        conv.length === 1 && conv[0].foot.join().includes('400.00'), JSON.stringify(conv));
+
   check('no page errors', pg.errors.length === 0, pg.errors.join(' | '));
   await pg.ctx.close();
 }

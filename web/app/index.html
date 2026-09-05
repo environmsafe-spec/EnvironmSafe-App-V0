@@ -211,7 +211,17 @@
   .doc-pay p { margin:0; }
   @page { margin: 10mm; }
 
+  /* One currency per section, so a statement in three currencies prints as
+     three statements rather than one impossible total. */
+  .cur-head { margin:1.4rem 0 .4rem; padding:.28rem .6rem; border-radius:.3rem;
+              background:var(--s-head, #14304d); color:#fff; font-size:.95rem; letter-spacing:.06em; }
+  .cur-block.first .cur-head { margin-top:.2rem; }
+
   @media print {
+    .cur-block { break-before:page; page-break-before:always; }
+    .cur-block.first { break-before:auto; page-break-before:auto; }
+    .cur-head { background:none; color:#000; border-bottom:2px solid #000; border-radius:0;
+                padding:.1rem 0; font-weight:700; }
     .topbar, nav.side, .toolbar, .noprint { display:none !important; }
     .shell { display:block; }
     main { padding:0; }
@@ -1984,7 +1994,11 @@ function viewReport(m, kind) {
     on:() => openColumnPicker(kind, titles[kind], flexCols.body, render) });
   pageHead(m, titles[kind], CO().name, actions);
   // official documents carry their own letterhead
-  if (kind !== "document") printHeader(m, titles[kind], `${rep.from || "start"} → ${rep.to || today()}`);
+  if (kind !== "document")
+    printHeader(m, titles[kind], `${rep.from || "start"} → ${rep.to || today()}` +
+      (FX_ON ? " · all currencies converted to USD"
+             : CUR ? " · " + CUR
+             : currenciesInUse().length > 1 ? " · one section per currency" : ""));
 
   const bar = el("div", { class:"toolbar noprint" });
   bar.appendChild(fld("From | من", `<input type="date" id="r_from" value="${esc(rep.from)}">`));
@@ -2682,7 +2696,27 @@ function repSummary(m) {
   m.appendChild(acc);
 }
 
-function repParty(m, tbl) {
+/* A statement adds money up, so it has to be in one currency. When the picker is
+   on "All currencies" the report is drawn once per currency actually used — three
+   headed sections, each with its own opening and closing balance, all in one
+   print — instead of one total that means nothing. Pick a single currency and you
+   get that one; pick the converted view and you get one section in USD. */
+function perCurrency(m, draw) {
+  const list = currenciesInUse();
+  if (CUR || list.length <= 1) return draw(m);
+  list.forEach((c, i) => {
+    const prevCur = CUR, prevFx = FX_ON;
+    CUR = c; FX_ON = false;
+    const sec = el("section", { class:"cur-block" + (i ? "" : " first") });
+    sec.appendChild(el("h2", { class:"cur-head" }, c));
+    draw(sec);
+    CUR = prevCur; FX_ON = prevFx;
+    m.appendChild(sec);
+  });
+}
+
+function repParty(m, tbl) { perCurrency(m, mm => repPartyOne(mm, tbl)); }
+function repPartyOne(m, tbl) {
   const isCus = tbl === "customers";
   const kind = isCus ? "customer" : "supplier";
   const cols = reportCols(kind);
@@ -2753,7 +2787,8 @@ function repParty(m, tbl) {
   });
 }
 
-function repProject(m) {
+function repProject(m) { perCurrency(m, repProjectOne); }
+function repProjectOne(m) {
   const cols = reportCols("project");
   const allCols = [...cols.lead, ...visibleBody("project", cols.body)];
   const list = rep.entity ? [byId("projects", rep.entity)].filter(Boolean) : rowsOf("projects");
@@ -2772,7 +2807,8 @@ function repProject(m) {
   m.appendChild(w);
 }
 
-function repEmployee(m) {
+function repEmployee(m) { perCurrency(m, repEmployeeOne); }
+function repEmployeeOne(m) {
   const cols = reportCols("employee");
   const allCols = [...cols.lead, ...visibleBody("employee", cols.body)];
   const list = rep.entity ? [byId("employees", rep.entity)].filter(Boolean) : rowsOf("employees");
@@ -3544,12 +3580,18 @@ function viewData(m) {
             DB = Object.assign(blankDb(), incoming);
           } else if (mode === "books") {
             const n = (incoming.transactions || []).length;
-            if (!confirm(`Throw away every transaction and master record on this device and put ` +
-                         `${n} transactions from this file in their place?\n\n` +
+            if (!confirm(`Throw away all ${DB.transactions.length} transactions and every master ` +
+                         `record on this device, and put ${n} transactions from this file in their place?\n\n` +
+                         `The old books are downloaded as a file first, so this can be undone.\n` +
                          `Sign-ins and the company profile are kept. If this device is linked to the ` +
                          `cloud, the same replacement reaches the other users on their next sync.`)) return;
+            // Nobody should be one mis-click from losing a year of bookkeeping.
+            // The old books are written to a file before the new ones land.
+            const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+            saveFile(`environmsafe-before-replace-${stamp}.json`, JSON.stringify(DB, null, 1));
             replaceBooks(incoming);
-            toast(`Books replaced — ${DB.transactions.length} transactions`);
+            toast(`Books replaced — ${DB.transactions.length} transactions. ` +
+                  `The old books were saved to a file first.`);
           } else {
             const added = mergeDb(incoming);
             toast(`Merged — ${added} new or updated records`);

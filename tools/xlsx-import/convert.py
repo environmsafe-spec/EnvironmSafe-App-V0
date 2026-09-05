@@ -182,7 +182,12 @@ TYPE_MAP = {
     "PEDDY CASH":  {"debit":"TRANSFER OUT",    "credit":"TRANSFER IN"},
 }
 # app side per type, so every row posts the way the app itself would post it
+# The two owners. Money handed to them is a drawing; money handed to anyone
+# else is an advance the company expects back.
+OWNERS = ("AKRAM", "HAYEL")
+
 SIDE = {"RECEIPT":"credit","EXPENSE":"debit","REFUND FROM SUPPLIER":"credit",
+        "ADVANCE TO EMPLOYEE":"debit",
         "INVOICE OUT":"credit","SALARY":"debit","OWNER DRAWINGS":"debit","LOAN IN":"credit",
         "TRANSFER OUT":"debit","TRANSFER IN":"credit","DEPOSIT PAID":"debit",
         "DEPOSIT RETURNED":"credit","OTHER":"debit"}
@@ -214,10 +219,27 @@ for r in real:
     # The label may sit in any of the party columns; the money never leaves the
     # company, so it is neither revenue nor cost — only a movement that has to
     # show on both account ledgers for their balances to be right.
+    # The Customer or Supplier column saying "internal transfer", or the row's own
+    # type being Transfer or PEDDY CASH, is what makes a row a movement. The
+    # Project column is only a label: "Plastic Tank" bought from a real supplier
+    # is an expense however the project happens to be named.
     movement = (is_internal(g(r,"Customer")) or is_internal(g(r,"Supplier"))
-                or is_internal(g(r,"Project-ID")) or ftype.upper() in ("PEDDY CASH", "TRANSFER"))
+                or ftype.upper() in ("PEDDY CASH", "TRANSFER"))
     if movement:
         mapped = "TRANSFER OUT" if col == "debit" else "TRANSFER IN"
+    elif ftype.upper() == "DEBIT" and col == "debit":
+        # Money handed to a person. For the two owners it is theirs to take —
+        # an owner drawing. For anyone else it is money the company is owed
+        # back, so it is recorded as an advance and stays on that employee's
+        # report until it is returned. A DEBIT naming nobody is not a drawing
+        # by anyone: in this workbook it is a card charge that was reversed,
+        # and it is treated as the movement its matching leg says it is.
+        emp_up = s_(g(r,"Employee")).upper()
+        if not emp_up:
+            mapped = "TRANSFER OUT"
+            movement = True
+        else:
+            mapped = "OWNER DRAWINGS" if any(o in emp_up for o in OWNERS) else "ADVANCE TO EMPLOYEE"
     else:
         mapped = TYPE_MAP.get(ftype, {}).get(col)
         if not mapped:
