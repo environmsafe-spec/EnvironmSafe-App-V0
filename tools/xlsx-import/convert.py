@@ -7,7 +7,9 @@ Only rows carrying a real amount are treated as transactions; the workbook is a
 import openpyxl, json, re, datetime, sys
 from collections import Counter, defaultdict
 
-F = "/root/.claude/uploads/fef5c52b-4283-5ba4-8ca0-fe8eee5560eb/1e90dbb8-EnvironmSafe_Finance_Procurement_System_v4_15kRows_V2EnvironmSafe_GM_s_copy_Sep_04_210235.xlsx"
+if len(sys.argv) < 2:
+    sys.exit("usage: python3 convert.py <workbook.xlsx>  ->  environmsafe-import.json")
+F = sys.argv[1]
 wb = openpyxl.load_workbook(F, read_only=True, data_only=True)
 notes = []          # anything a human should look at
 def flag(msg): notes.append(msg)
