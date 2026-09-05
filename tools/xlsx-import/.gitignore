@@ -1,0 +1,4 @@
+# The converted books are the company's real financial records and this
+# repository is public. The file stays on the machine that made it.
+*.json
+*.xlsx
