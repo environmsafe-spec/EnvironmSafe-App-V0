@@ -92,8 +92,16 @@ module.exports = { name: 'columns (items & assets)', run: async (ctx) => {
   const afooter = await mainFooter(pg);
   const idx = h => assetAfter.slice(2).indexOf(h);   // 2 lead columns precede the summable region
   ctx.check('the cost total lands under Cost', afooter[1 + idx('Cost')] === '12,000,000.00', afooter.join(' | '));
+  // Depreciation accrues with the calendar, so the figure itself moves every
+  // month. What must hold — and what a misaligned footer would break — is that
+  // the three totals sit under their own headings and still add up.
+  const money = v => Number(String(v || '').replace(/,/g, ''));
+  const cost  = money(afooter[1 + idx('Cost')]);
+  const accum = money(afooter[1 + idx('Accumulated')]);
+  const nbv   = money(afooter[1 + idx('Net book value')]);
   ctx.check('the net book value total lands under Net book value',
-    afooter[1 + idx('Net book value')] === '8,516,666.67', afooter.join(' | '));
+    nbv > 0 && Math.abs(cost - accum - nbv) < 0.02,
+    `cost ${cost} − accumulated ${accum} ≠ net book value ${nbv}`);
   ctx.check('Serial, a text field, carries no total', afooter[1 + idx('Serial / chassis / plate no')] === '',
     afooter.join(' | '));
 

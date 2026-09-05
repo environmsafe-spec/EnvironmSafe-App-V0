@@ -684,7 +684,13 @@ const netRevenue = list => sum(list.filter(isRevenue), amountOf) - sum(list.filt
 const netCost    = list => sum(list.filter(isCost), amountOf) - sum(list.filter(isPurchaseReturn), amountOf);
 const isCashIn  = tx => flowOf(tx) === "cash_in";
 const isCashOut = tx => flowOf(tx) === "cash_out" || flowOf(tx) === "cost_cash_out";
-const amountOf  = tx => num(tx.debit) + num(tx.credit);
+const rawAmount = tx => num(tx.debit) + num(tx.credit);
+/* The amount as the current view wants it: the money as entered, or the same
+   money translated into USD while the converted view is on. Everything that
+   adds figures up goes through here; anything that reproduces a document — an
+   invoice, the edit form, the duplicate guard — uses rawAmount instead, because
+   a document must always show the money that actually changed hands. */
+const amountOf  = tx => FX_ON ? toUsd(rawAmount(tx), txCurrency(tx), tx.fxRate) : rawAmount(tx);
 const live      = tx => tx.status !== "Cancelled";
 
 /* ---------- currency ----------
@@ -695,6 +701,35 @@ const live      = tx => tx.status !== "Cancelled";
 
 const CURRENCIES = ["YER","USD","SAR","AED"];
 let CUR = localStorage.getItem("environmsafe.currency") || "";
+
+/* ---------- one report in USD ----------
+   Money in different currencies is still never added together by accident. But
+   a manager who needs one number across three banks can switch to the converted
+   view: every row is translated to USD using the rate saved on that row, or the
+   company's standing rate when the row carries none. FX_ON says the view is on;
+   the currency filter is then lifted, because the whole point is to see all of
+   it at once. Rates are "how many of this currency make one US dollar" — the
+   way a rate is quoted at the counter (530 YER, 3.75 SAR). */
+const FXV = "USD*";                       // the picker's value for the converted view
+const FX_DEFAULTS = { USD:1, SAR:3.75, AED:3.6725, YER:530 };
+const FX_ON_KEY = "environmsafe.currency";
+let FX_ON = CUR === FXV;
+
+/** The company's standing rate for a currency, editable under System → Data. */
+function fxRate(cur) {
+  const saved = (DB && DB.meta && DB.meta.fx) || {};
+  const r = num(saved[cur]);
+  return r > 0 ? r : (FX_DEFAULTS[cur] || 0);
+}
+/** Translate an amount, preferring the rate the person recorded on the row —
+    that is the rate the money actually moved at, which no later edit of the
+    standing rate should silently rewrite. */
+function toUsd(v, cur, rowRate) {
+  const r = num(rowRate) > 0 ? num(rowRate) : fxRate(cur);
+  return r > 0 ? v / r : 0;
+}
+/** Currency to show a converted figure in. */
+const dispCur = () => FX_ON ? "USD" : CUR;
 
 function txCurrency(tx) {
   if (tx.currency) return tx.currency;
@@ -716,7 +751,7 @@ function currencyChoices() {
   CURRENCIES.forEach(c => seen.add(c));
   return [...seen];
 }
-const curSuffix = () => (CUR ? " " + CUR : "");
+const curSuffix = () => (FX_ON ? " USD" : CUR ? " " + CUR : "");
 
 function inRange(tx, from, to) {
   if (from && tx.date < from) return false;
@@ -724,7 +759,8 @@ function inRange(tx, from, to) {
   return true;
 }
 function txs(filter = {}) {
-  const cur = filter.currency !== undefined ? filter.currency : CUR;
+  let cur = filter.currency !== undefined ? filter.currency : CUR;
+  if (cur === FXV) cur = "";              // the converted view spans every currency
   return DB.transactions
     .filter(live)
     .filter(tx => !cur || txCurrency(tx) === cur)
@@ -740,16 +776,25 @@ function txs(filter = {}) {
 }
 const sum = (list, fn) => list.reduce((s,x) => s + num(fn(x)), 0);
 
+/** An opening balance carried from before the system was in use is held in the
+    company's own currency. It belongs in a statement only when that statement is
+    in the same currency — or in the converted view, where it is translated. */
+function openingIn(opening, cur) {
+  const home = CO().currency || "YER";
+  if (cur === FXV) return toUsd(num(opening), home);
+  return cur && cur !== home ? 0 : num(opening);
+}
 function accountBalance(accId, upto) {
   const acc = byId("accounts", accId); if (!acc) return 0;
   // an account holds one currency, so its own rows are always comparable
   const list = txs({ accountId:accId, to:upto, currency:"" });
-  return num(acc.opening) + sum(list.filter(isCashIn), amountOf) - sum(list.filter(isCashOut), amountOf);
+  const opening = FX_ON ? toUsd(num(acc.opening), acc.currency || CO().currency || "YER") : num(acc.opening);
+  return opening + sum(list.filter(isCashIn), amountOf) - sum(list.filter(isCashOut), amountOf);
 }
 function customerBalance(cusId, upto, cur) {
   const c = byId("customers", cusId); if (!c) return 0;
   const list = txs({ customerId:cusId, to:upto, currency:cur === undefined ? CUR : cur });
-  const opening = (cur === undefined ? CUR : cur) && (cur || CUR) !== (CO().currency || "YER") ? 0 : num(c.opening);
+  const opening = openingIn(c.opening, cur === undefined ? CUR : cur);
   //  invoiced − returned − received + refunded back to them
   return opening + sum(list.filter(isRevenue), amountOf)
                  - sum(list.filter(isSalesReturn), amountOf)
@@ -759,7 +804,7 @@ function customerBalance(cusId, upto, cur) {
 function supplierBalance(supId, upto, cur) {
   const s = byId("suppliers", supId); if (!s) return 0;
   const list = txs({ supplierId:supId, to:upto, currency:cur === undefined ? CUR : cur });
-  const opening = (cur === undefined ? CUR : cur) && (cur || CUR) !== (CO().currency || "YER") ? 0 : num(s.opening);
+  const opening = openingIn(s.opening, cur === undefined ? CUR : cur);
   //  billed − returned − paid + refunded back to us
   return opening + sum(list.filter(isBilled), amountOf)
                  - sum(list.filter(isPurchaseReturn), amountOf)
@@ -814,7 +859,7 @@ const totalNBV = upto => rowsOf("assets")
   .filter(a => assetLive(a)).reduce((s,a) => s + netBookValue(a, upto), 0);
 const periodDepn = (from, to) => rowsOf("assets").reduce((s,a) => s + depnInPeriod(a, from, to), 0);
 
-const curAccounts = () => rowsOf("accounts").filter(a => !CUR || (a.currency || CO().currency) === CUR);
+const curAccounts = () => rowsOf("accounts").filter(a => FX_ON || !CUR || (a.currency || CO().currency) === CUR);
 const totalCash = () => curAccounts().reduce((s,a) => s + accountBalance(a.id), 0);
 const totalAR = () => rowsOf("customers").reduce((s,c) => s + customerBalance(c.id), 0);
 const totalAP = () => rowsOf("suppliers").reduce((s,x) => s + supplierBalance(x.id), 0);
@@ -878,7 +923,7 @@ function render() {
     // never leave the user staring at an empty screen because the chosen
     // currency holds nothing while their data sits in another one
     const inUse = currenciesInUse();
-    if (CUR && inUse.length && !inUse.includes(CUR)) {
+    if (CUR && CUR !== FXV && inUse.length && !inUse.includes(CUR)) {
       CUR = inUse[0];
       localStorage.setItem("environmsafe.currency", CUR);
     }
@@ -986,7 +1031,7 @@ function viewDashboard(m) {
   const depn    = periodDepn("", today());
   const profit  = revenue - cost - depn;
 
-  pageHead(m, t("dashboard"), CO().name + " · " + CUR);
+  pageHead(m, t("dashboard"), CO().name + " · " + dispCur() + (FX_ON ? " (converted)" : ""));
   printHeader(m, "Management dashboard");
 
   const kpis = el("div", { class:"kpis" });
@@ -995,7 +1040,7 @@ function viewDashboard(m) {
   kpi(t("revenue"), fmt0(revenue), "Customer invoices issued");
   kpi(t("costs"), fmt0(cost), "Supplier bills, expenses, salaries");
   kpi(t("profit"), fmt0(profit), "Revenue − costs − depreciation", profit >= 0 ? "good" : "crit");
-  kpi(t("cash"), fmt0(totalCash()), `Bank & cash in ${CUR}`);
+  kpi(t("cash"), fmt0(totalCash()), `Bank & cash in ${dispCur()}`);
   kpi(t("ar"), fmt0(totalAR()), "Owed to us by customers");
   kpi(t("ap"), fmt0(totalAP()), "Owed by us to suppliers");
   const dep = depositsHeld();
@@ -1141,6 +1186,9 @@ function viewDaily(m) {
   g.appendChild(fld("Line discount | خصم السطر", `<input type="number" step="0.01" min="0" name="discount" placeholder="0">`));
   g.appendChild(fld("Amount | المبلغ", `<input type="number" step="0.01" min="0" name="amount" value="${
     d.amount || ""}" placeholder="0.00">`));
+  g.appendChild(fld("Rate to USD | سعر الصرف مقابل الدولار",
+    `<input type="number" step="0.0001" min="0" name="fxRate" value="${esc(d.fxRate || "")}"
+      placeholder="how many of this currency make 1 USD">`));
   g.appendChild(fld("Is this a fixed asset? | أصل ثابت؟",
     `<select name="isAsset"><option>No</option><option>Yes</option></select>`));
   g.appendChild(fld("Asset tag / serial | رقم الأصل", `<input name="assetTag" placeholder="added to the asset register">`));
@@ -1202,6 +1250,17 @@ function viewDaily(m) {
   form.unitPrice.oninput = recalc;
   form.discount.oninput = recalc;
   form.type.onchange = () => { syncHint(); if (form.itemId.value) form.itemId.onchange(); };
+  // The rate follows the account's currency, so the common case needs no typing;
+  // a day with an unusual rate is still typed over by hand and kept on the row.
+  const suggestRate = () => {
+    const a = byId("accounts", form.accountId.value);
+    const cur = (a && a.currency) || CO().currency || "YER";
+    form.fxRate.placeholder = `${cur} — usually ${fxRate(cur)} to 1 USD`;
+    if (!form.fxRate.dataset.touched) form.fxRate.value = fxRate(cur) || "";
+  };
+  form.fxRate.oninput = () => { form.fxRate.dataset.touched = "1"; };
+  form.accountId.onchange = suggestRate;
+  suggestRate();
   syncHint();
 
   form.onsubmit = e => {
@@ -1224,6 +1283,7 @@ function viewDaily(m) {
       projectId:f.projectId, accountId:f.accountId, categoryId:f.categoryId,
       itemId:f.itemId, qty:num(f.qty), unitPrice:num(f.unitPrice), discount:num(f.discount), isAsset:f.isAsset,
       currency:(byId("accounts", f.accountId) || {}).currency || CO().currency || "YER",
+      fxRate:num(f.fxRate),
       debit: ty.side === "debit" ? amount : 0,
       credit: ty.side === "credit" ? amount : 0,
       status:f.status, refNo:f.refNo, againstRef:f.againstRef, docType:f.docType, docRef:f.docRef, notes:f.notes,
@@ -1279,7 +1339,7 @@ function similarTransactions(cand, list) {
     if (ref && (x.refNo || "").trim().toLowerCase() === ref) return true;
     if (x.type !== cand.type) return false;
     if (!sameParty(x, cand)) return false;
-    if (!closeAmount(amountOf(x), amount)) return false;
+    if (!closeAmount(rawAmount(x), amount)) return false;
     const dd = dayDiff(x.date, cand.date);
     return dd !== null && dd <= DUP_DAYS;
   }).sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
@@ -1292,7 +1352,7 @@ function duplicateTxWarning(cand, list) {
   const d = dups[0];
   const party = nameOf("customers", d.customerId) || nameOf("suppliers", d.supplierId)
              || nameOf("employees", d.employeeId) || "";
-  const line = [d.id, d.date, d.type, fmt(amountOf(d)) + " " + (d.currency || ""), party,
+  const line = [d.id, d.date, d.type, fmt(rawAmount(d)) + " " + (d.currency || ""), party,
                 d.refNo ? "Ref " + d.refNo : ""].filter(Boolean).join(" · ");
   const ar = LANG === "ar";
   let msg = (ar ? "\u26a0\ufe0f توجد حركة مشابهة مسجّلة بالفعل:\n" : "\u26a0\ufe0f A similar transaction is already recorded:\n") + line;
@@ -1321,7 +1381,7 @@ function registerAssetFrom(tx, f) {
     supplierId: tx.supplierId || "",
     acquiredOn: tx.date,
     qty: num(tx.qty) || 1,
-    cost: amountOf(tx),
+    cost: rawAmount(tx),
     lifeYears: it ? num(it.lifeYears) || 5 : 5,
     salvage: 0,
     method: "Straight line",
@@ -1393,7 +1453,8 @@ function editTx(tx) {
   const ty = typeOf(tx.type);
   modal("Edit " + tx.id, [
     { k:"date", l:"Date", t:"date", v:tx.date },
-    { k:"amount", l:"Amount", t:"number", v:amountOf(tx) },
+    { k:"amount", l:"Amount", t:"number", v:rawAmount(tx) },
+    { k:"fxRate", l:"Rate to USD (" + txCurrency(tx) + " per 1 USD)", t:"number", v:tx.fxRate || "" },
     { k:"status", l:"Status", t:"select", opts:STATUSES, v:tx.status },
     { k:"caseNo", l:"Case / file no", v:tx.caseNo },
     { k:"refNo", l:"Reference no", v:tx.refNo },
@@ -1403,7 +1464,7 @@ function editTx(tx) {
     if (!canEdit()) return toast("Your role is read-only.");
     if (vals.status === "Approved" && tx.status === "Draft" && !canApprove())
       return toast("Only a Reviewer can approve.");
-    Object.assign(tx, vals);
+    Object.assign(tx, vals, { fxRate:num(vals.fxRate) });
     const amt = num(vals.amount);
     tx.debit  = ty.side === "debit"  ? amt : 0;
     tx.credit = ty.side === "credit" ? amt : 0;
@@ -1454,7 +1515,7 @@ function viewLedger(m) {
 
 function exportTransactionsCsv() {
   const cols = ["id","date","type","phase","caseNo","customerId","supplierId","employeeId","projectId",
-                "accountId","categoryId","itemId","qty","unitPrice","discount","isAsset","debit","credit","status","refNo","againstRef",
+                "accountId","categoryId","itemId","qty","unitPrice","discount","isAsset","currency","fxRate","debit","credit","status","refNo","againstRef",
                 "docType","docRef","notes","createdBy"];
   const refTbl = { customerId:"customers", supplierId:"suppliers", employeeId:"employees",
                    projectId:"projects", accountId:"accounts", categoryId:"categories", itemId:"items" };
@@ -1691,6 +1752,8 @@ function partyCols(isCus) {
       { id:"qty",       label:"Qty",     num:true,  default:false },
       { id:"unitPrice", label:"Unit price", num:true, default:false },
       { id:"discount",  label:"Discount", num:true, default:false },
+      { id:"currency",  label:"Currency", num:false, default:false },
+      { id:"rate",      label:"Rate to USD", num:true, default:false },
       { id:"docType",   label:"Document type", num:false, default:false },
       { id:"docRef",    label:"Document file / link", num:false, default:false },
       { id:"status",    label:"Status",  num:false, default:false },
@@ -2004,7 +2067,7 @@ function reportToXlsx(titleText) {
   rows.push([]);
   rows.push([{ v:title, s:1 }]);
   rows.push([`Period: ${rep.from || "start"} → ${rep.to || today()}`]);
-  if (CUR) rows.push([`Currency: ${CUR}`]);
+  if (CUR) rows.push([`Currency: ${dispCur()}${FX_ON ? " (converted)" : ""}`]);
   rows.push([]);
 
   let widest = 3;
@@ -2236,7 +2299,7 @@ function documentToXlsx(lines, refNo) {
     const it = byId("items", x.itemId);
     rows.push([{ v:i + 1, s:7 }, { v:it ? it.nameEn : (x.notes || x.type), s:7 },
                { v:it ? it.unit || "" : "", s:7 },
-               N(x.qty || ""), N(x.unitPrice || ""), N(x.discount || ""), N(amountOf(x))]);
+               N(x.qty || ""), N(x.unitPrice || ""), N(x.discount || ""), N(rawAmount(x))]);
   });
   rows.push([]);
   const totalRow = (label, value) => rows.push(["", "", "", "", B(label), "", { v:value, s:6, num:true }]);
@@ -2482,7 +2545,7 @@ function saveDocExtras(ref, vals) {
 
 /** Subtotal, discount, tax, shipping and total, exactly as the paper form adds up. */
 function docTotals(lines, ex) {
-  const subtotal = sum(lines, amountOf);
+  const subtotal = sum(lines, rawAmount);
   const discount = num(ex.discount);
   const taxable  = subtotal - discount;
   const rate     = num(ex.taxRate);
@@ -2543,7 +2606,7 @@ function officialDoc(lines, refNo) {
         <td class="num">${x.qty ? fmt(x.qty) : ""}</td>
         <td class="num">${x.unitPrice ? fmt(x.unitPrice) : ""}</td>
         <td class="num">${num(x.discount) ? fmt(x.discount) : ""}</td>
-        <td class="num">${fmt(amountOf(x))}</td></tr>`;
+        <td class="num">${fmt(rawAmount(x))}</td></tr>`;
     }).join("")}</tbody></table></div>
 
     <table class="totals"><tbody>
@@ -2657,6 +2720,8 @@ function repParty(m, tbl) {
         qty: x.qty ? fmt(x.qty) : "",
         unitPrice: x.unitPrice ? fmt(x.unitPrice) : "",
         discount: x.discount ? fmt(x.discount) : "",
+        currency: esc(txCurrency(x)),
+        rate: fmt(num(x.fxRate) || fxRate(txCurrency(x))),
         docType: esc(x.docType || ""),
         docRef: esc(x.docRef || ""),
         status: esc(x.status || ""),
@@ -3446,6 +3511,8 @@ function viewData(m) {
   cloudCard(m);
   driveCard(m);
 
+  fxCard(m);
+
   const c1 = el("div", { class:"card" });
   c1.innerHTML = `<h2>Backup</h2><p class="card-note">Writes one file containing every record.
     Keep it in Drive, OneDrive or WhatsApp so nothing is lost if a phone is replaced.</p>`;
@@ -3475,6 +3542,14 @@ function viewData(m) {
           if (mode === "replace") {
             if (!confirm("Replace ALL data on this device?")) return;
             DB = Object.assign(blankDb(), incoming);
+          } else if (mode === "books") {
+            const n = (incoming.transactions || []).length;
+            if (!confirm(`Throw away every transaction and master record on this device and put ` +
+                         `${n} transactions from this file in their place?\n\n` +
+                         `Sign-ins and the company profile are kept. If this device is linked to the ` +
+                         `cloud, the same replacement reaches the other users on their next sync.`)) return;
+            replaceBooks(incoming);
+            toast(`Books replaced — ${DB.transactions.length} transactions`);
           } else {
             const added = mergeDb(incoming);
             toast(`Merged — ${added} new or updated records`);
@@ -3488,6 +3563,7 @@ function viewData(m) {
     return b;
   };
   c2.appendChild(mkImport("merge","Merge a backup","gold"));
+  c2.appendChild(mkImport("books","Replace the books","ghost"));
   c2.appendChild(mkImport("replace","Replace all data","ghost"));
   m.appendChild(c2);
 
@@ -3520,6 +3596,56 @@ function viewData(m) {
   };
   c4.appendChild(b4);
   m.appendChild(c4);
+}
+
+/* The books are the day-to-day records: transactions and the master lists they
+   point at. Sign-ins and the company profile are not part of them — replacing a
+   year of bookkeeping should not lock the five users out or wipe the letterhead.
+   Because the emptied records simply stop existing here, the sync engine already
+   sends them as deletions, so the other devices follow. */
+const BOOK_TABLES = ["items","assets","customers","suppliers","employees",
+                     "projects","accounts","categories","transactions"];
+function replaceBooks(incoming) {
+  BOOK_TABLES.forEach(tbl => { DB[tbl] = []; });
+  DB.meta.seq = {};
+  DB.meta.docs = {};
+  mergeDb(incoming);
+  if (incoming.meta && incoming.meta.fx) DB.meta.fx = incoming.meta.fx;
+  save();
+  render();
+}
+
+/** Standing exchange rates, quoted the way the money changer quotes them. */
+function fxCard(m) {
+  const c = el("div", { class:"card" });
+  c.innerHTML = `<h2>Exchange rates</h2><p class="card-note">
+    How many of each currency make <b>one US dollar</b>. A transaction may carry its own
+    rate — the rate it actually moved at — and that one always wins. These are the fallback,
+    used by the <b>All → USD (converted)</b> view in the currency picker and suggested on
+    new entries.</p>`;
+  const w = el("div", { class:"tablewrap" });
+  w.innerHTML = `<table><thead><tr><th>Currency</th><th class="num">Per 1 USD</th>
+    <th class="num">Rows using it</th></tr></thead><tbody>${
+    CURRENCIES.map(cur => {
+      const used = DB.transactions.filter(x => live(x) && txCurrency(x) === cur).length;
+      return `<tr><td>${esc(cur)}</td>
+        <td class="num"><input type="number" step="0.0001" min="0" data-fx="${esc(cur)}"
+          value="${esc(String(fxRate(cur)))}" style="width:8rem;text-align:right"
+          ${cur === "USD" ? "disabled" : ""}></td>
+        <td class="num">${used}</td></tr>`;
+    }).join("")}</tbody></table>`;
+  c.appendChild(w);
+  const b = el("button", { class:"btn gold sm", style:"margin-top:.7rem" }, "Save rates");
+  b.onclick = () => {
+    if (!canEdit()) return toast("Your role is read-only.");
+    const fx = {};
+    w.querySelectorAll("[data-fx]").forEach(i => { const v = num(i.value); if (v > 0) fx[i.dataset.fx] = v; });
+    fx.USD = 1;
+    DB.meta.fx = fx;
+    save(); render(); toast("Rates saved");
+  };
+  c.appendChild(b);
+  m.appendChild(c);
 }
 
 function mergeDb(incoming) {
@@ -3625,10 +3751,12 @@ $("#acctBtn").onclick = accountMenu;
 function fillCurrencySelect() {
   const list = currencyChoices();
   $("#curSel").innerHTML = `<option value="">All currencies</option>` +
-    list.map(c => `<option value="${esc(c)}" ${c === CUR ? "selected" : ""}>${esc(c)}</option>`).join("");
+    list.map(c => `<option value="${esc(c)}" ${c === CUR ? "selected" : ""}>${esc(c)}</option>`).join("") +
+    `<option value="${FXV}" ${CUR === FXV ? "selected" : ""}>All → USD (converted)</option>`;
 }
 $("#curSel").onchange = e => {
   CUR = e.target.value;
+  FX_ON = CUR === FXV;
   localStorage.setItem("environmsafe.currency", CUR);
   render();
 };
