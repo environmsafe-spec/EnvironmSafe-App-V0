@@ -315,6 +315,57 @@ for r in real:
         "sourceRef": s_(g(r,"Transaction ID")),
     })
 
+# ------------------------------------------------- opening balances at the cutoff
+# The company started keeping its books here on 19 July 2025. Payments received
+# before that date are in the workbook, but the invoices they settled are not —
+# so every one of them reads as a customer paying for nothing, and the statement
+# opens deep in credit. One invoice per customer per currency, dated the day
+# before, restores the invoices that are missing and brings each customer to zero
+# at the cutoff. They are marked plainly: nobody should mistake them for real
+# documents, and each one says what it stands for.
+OPEN_CUTOFF = "2025-07-19"
+OPEN_REF    = "OPEN-" + OPEN_CUTOFF
+OPEN_DATE   = "2025-07-18"
+
+REVENUE_T  = {"INVOICE OUT"}
+CASH_IN_T  = {"RECEIPT", "TRANSFER IN", "DEPOSIT RETURNED"}
+
+opening_bal = defaultdict(float)
+for x in db["transactions"]:
+    if not x["customerId"] or x["date"] >= OPEN_CUTOFF: continue
+    k = (x["customerId"], x["currency"])
+    if   x["type"] in REVENUE_T: opening_bal[k] += x["debit"] + x["credit"]
+    elif x["type"] in CASH_IN_T: opening_bal[k] -= x["debit"] + x["credit"]
+
+opening_rows = []
+for (cid, cur), v in sorted(opening_bal.items()):
+    if abs(v) < 0.005: continue
+    # A negative balance means they paid for invoices we do not have: raise them.
+    # A positive one means we invoiced work whose payment is not in the sheet.
+    kind   = "INVOICE OUT" if v < 0 else "RECEIPT"
+    amount = abs(v)
+    seq += 1
+    now = datetime.datetime.utcnow().isoformat() + "Z"
+    opening_rows.append({
+        "id": ident("TRX", seq), "uid": uid(), "date": OPEN_DATE,
+        "type": kind, "phase": "INVOICE OUT" if kind == "INVOICE OUT" else "PAYMENT",
+        "caseNo": "", "customerId": cid, "supplierId": "", "employeeId": "",
+        "projectId": "", "accountId": "", "categoryId": "", "itemId": "",
+        "qty": 0, "unitPrice": 0, "discount": 0, "isAsset": "No", "currency": cur,
+        "fxRate": FX.get(cur, 0),
+        "debit":  amount if SIDE[kind] == "debit"  else 0,
+        "credit": amount if SIDE[kind] == "credit" else 0,
+        "status": "Approved", "refNo": OPEN_REF, "againstRef": "",
+        "docType": "", "docRef": "",
+        "notes": f"Opening balance at {OPEN_CUTOFF}. Stands for the {kind.lower()}s "
+                 f"raised before the books started and not carried in the workbook; "
+                 f"it brings this customer to zero at the cutoff. Not a real document.",
+        "createdBy": "import", "createdAt": now, "updatedAt": now,
+        "sourceRef": OPEN_REF,
+    })
+# An opening entry has no bank account, so it moves no money — only the balance.
+db["transactions"].extend(opening_rows)
+
 # ---------------------------------------------------------------- pair the legs
 # A movement is two rows: one account loses the money, another gains it. Tying
 # the two together lets the app show, from either ledger, where the money went.
@@ -380,6 +431,10 @@ print(f"  of those, carrying some text : {len(skipped_with_content)}")
 print()
 for t in ("transactions","customers","suppliers","employees","projects","accounts","categories"):
     print(f"  {t:<13} {len(db[t]):>5}")
+print(f"\nopening entries at {OPEN_CUTOFF}   : {len(opening_rows)}")
+for x in opening_rows:
+    who = next((c["nameEn"] for c in db["customers"] if c["id"] == x["customerId"]), x["customerId"])
+    print(f"     {who:<22} {x['type']:<12} {x['debit']+x['credit']:>16,.2f} {x['currency']}")
 print(f"\nmovement legs paired           : {paired} pairs, {unpaired} legs with no partner")
 print("\n-- transactions by mapped type --")
 for t,k in Counter(x["type"] for x in db["transactions"]).most_common():

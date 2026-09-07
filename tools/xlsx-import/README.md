@@ -62,6 +62,15 @@ that employee's report until it is returned. A DEBIT naming nobody is not a
 drawing by anyone; in this workbook it is a card charge that was reversed, and it
 is treated as the movement its matching leg says it is.
 
+**The books start on 19 July 2025.** Payments received before that date are in
+the workbook; the invoices they settled are not. Left alone, each one reads as a
+customer paying for nothing and the statement opens deep in credit — which
+understates what they still owe. One entry per customer per currency, dated
+18 July 2025 and referenced `OPEN-2025-07-19`, stands in for the missing
+invoices and brings every customer to exactly zero at the cutoff. It carries no
+bank account, so it moves no money — only the balance. Change `OPEN_CUTOFF` to
+move the date.
+
 **One spelling per party.** `Al Zailee` and `Al  Zailee` are the same customer
 and merge. `AL ZAILEE-ADEN` is a different customer and keeps its own record.
 

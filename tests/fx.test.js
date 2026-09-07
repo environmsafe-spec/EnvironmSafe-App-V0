@@ -146,6 +146,55 @@ async function run(ctx) {
   check('the converted statement is a single section in USD',
         conv.length === 1 && conv[0].foot.join().includes('400.00'), JSON.stringify(conv));
 
+  /* ---- an opening entry brings a customer to zero at the cutoff ---- */
+  // Money received before the books started settled invoices nobody kept. Left
+  // alone it reads as a customer paying for nothing, and the statement opens
+  // deep in credit — which understates what they still owe.
+  await pg.evaluate(() => {
+    DB.customers.push({ id: 'CUS-T2', uid: 'cus-t2', nameEn: 'Old Ledger Co', opening: 0 });
+    const row = o => Object.assign({ id: nextId('TRX'), uid: newUid(), phase: 'OTHER',
+      caseNo: '', customerId: 'CUS-T2', supplierId: '', employeeId: '', projectId: '',
+      accountId: '', categoryId: '', itemId: '', qty: 0, unitPrice: 0, discount: 0,
+      isAsset: 'No', currency: 'USD', fxRate: 1, debit: 0, credit: 0, status: 'Approved',
+      refNo: '', againstRef: '', docType: '', docRef: '', notes: '',
+      updatedAt: new Date().toISOString() }, o);
+    DB.transactions.push(row({ date: '2025-03-01', type: 'RECEIPT', credit: 5000 }));
+    DB.transactions.push(row({ date: '2025-07-18', type: 'INVOICE OUT', credit: 5000,
+                               refNo: 'OPEN-2025-07-19' }));         // the opening entry
+    DB.transactions.push(row({ date: '2025-07-19', type: 'INVOICE OUT', credit: 1156.95 }));
+    save();
+  });
+  const bal = await pg.evaluate(() => ({
+    cutoff: customerBalance('CUS-T2', '2025-07-18', 'USD'),
+    first:  customerBalance('CUS-T2', '2025-07-19', 'USD'),
+    cash:   totalCash()
+  }));
+  check('the opening entry brings the customer to zero at the cutoff',
+        Math.abs(bal.cutoff) < 0.005, `got ${bal.cutoff}`);
+  check('the first kept invoice then stands alone as the balance',
+        Math.abs(bal.first - 1156.95) < 0.005, `got ${bal.first}`);
+
+  // An opening entry restores a missing invoice, not a missing payment: it must
+  // change what the customer owes without touching a single bank balance.
+  const cashBefore = await pg.evaluate(() => {
+    DB.accounts.push({ id: 'ACC-T1', uid: 'acc-t1', nameEn: 'Test USD', kind: 'Bank',
+                       currency: 'USD', opening: 25000 });
+    save();
+    return totalCash();
+  });
+  const noCash = await pg.evaluate(() => {
+    DB.transactions.push({ id: nextId('TRX'), uid: newUid(), date: '2025-07-18',
+      type: 'INVOICE OUT', customerId: 'CUS-T2', accountId: '', currency: 'USD',
+      fxRate: 1, debit: 0, credit: 9999, status: 'Approved', refNo: 'OPEN-2025-07-19',
+      updatedAt: new Date().toISOString() });
+    save();
+    return { cash: totalCash(), owed: customerBalance('CUS-T2', '', 'USD') };
+  });
+  check('an opening entry never moves a bank balance',
+        cashBefore === 25000 && noCash.cash === 25000, `${cashBefore} → ${noCash.cash}`);
+  check('but it does change what the customer owes',
+        Math.abs(noCash.owed - (1156.95 + 9999)) < 0.005, `got ${noCash.owed}`);
+
   check('no page errors', pg.errors.length === 0, pg.errors.join(' | '));
   await pg.ctx.close();
 }
