@@ -452,6 +452,47 @@ if unmapped_types:
     print("\n!! unmapped type/column combinations:", dict(unmapped_types))
 if status_notes:
     print("\n!! status notes:", dict(status_notes))
+# ---------------------------------------------------------------------------
+# House rule: a project belongs to a customer, and says so — its name starts
+# with the customer's name. A row whose customer and project disagree is a
+# typing slip somewhere, and the wrong one will quietly mis-state either that
+# customer's statement or that project's profit. Checked on every run.
+# Internal work — salaries, zakah, the owners' own spending, transfers between
+# our accounts — has no customer at all, so those projects never carry one. That
+# makes a row naming BOTH a customer and an internal project just as wrong as one
+# naming the wrong customer, and it is reported too rather than waved through.
+cust_names = sorted((c["nameEn"].upper().strip() for c in db["customers"]), key=len, reverse=True)
+def project_owner(pname):
+    up = re.sub(r"\s+", " ", pname).upper().strip()
+    return next((c for c in cust_names if up.startswith(c)), "")
+
+proj_name = {p["id"]: p["nameEn"] for p in db["projects"]}
+cust_name = {c["id"]: c["nameEn"] for c in db["customers"]}
+rule_breaks = []
+for x in db["transactions"]:
+    if not x["customerId"] or not x["projectId"]: continue
+    cn = cust_name.get(x["customerId"], "").upper().strip()
+    pn = re.sub(r"\s+", " ", proj_name.get(x["projectId"], "")).upper().strip()
+    if pn.startswith(cn): continue
+    rule_breaks.append((x["sourceRef"], x["type"], cust_name[x["customerId"]],
+                        proj_name[x["projectId"]], project_owner(proj_name[x["projectId"]])))
+
+print(f"\n-- project/customer rule: {len(rule_breaks)} rows where the project does not "
+      f"start with the customer's name --")
+for ref, ty, cn, pn, owner in rule_breaks:
+    print(f"   {ref:<12} {ty:<12} customer {cn[:26]:<26} project {pn[:26]:<26}"
+          f" -> {owner or 'names no customer'}")
+
+# The reverse worry — money a customer owes us, filed under nobody — is worse,
+# because it never reaches their statement at all. Cost rows are fine without a
+# customer: they are carried by the project.
+orphan = [x for x in db["transactions"]
+          if not x["customerId"] and x["type"] in ("INVOICE OUT", "RECEIPT")
+          and x["projectId"] and project_owner(proj_name.get(x["projectId"], ""))]
+print(f"-- invoices and receipts with no customer, whose project names one: {len(orphan)} --")
+for x in orphan:
+    print(f"   {x['sourceRef']:<12} {x['type']:<12} {proj_name[x['projectId']]}")
+
 if notes:
     print(f"\n!! {len(notes)} flags:")
     for n in notes[:12]: print("   -", n)

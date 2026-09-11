@@ -74,6 +74,20 @@ move the date.
 **One spelling per party.** `Al Zailee` and `Al  Zailee` are the same customer
 and merge. `AL ZAILEE-ADEN` is a different customer and keeps its own record.
 
+## The house rule it checks
+
+A project belongs to a customer and says so: its name starts with that
+customer's name. Every run reports the rows where a transaction's customer and
+its project disagree — a typing slip that will quietly mis-state either that
+customer's statement or that project's profit, and which no total will ever
+reveal. Internal work (salaries, zakah, the owners' own spending, transfers
+between our accounts) carries no customer, so a row naming both a customer and
+an internal project is reported too.
+
+The reverse is checked separately and matters more: an invoice or a payment
+filed under no customer never reaches anybody's statement. Cost rows without a
+customer are normal and are not reported — a cost is carried by its project.
+
 ## Reading the run
 
 The converter prints what it dropped and why, the transaction count by type, the
