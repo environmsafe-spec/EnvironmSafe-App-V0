@@ -12,7 +12,7 @@ const STATIC_PORT = Number(process.env.ES_TEST_PORT || 8921);
 const MOCK_PORT   = Number(process.env.ES_MOCK_PORT || 8922);
 const ACCOUNT     = { email: 'akram@environmsafe.com', password: 'Aden#2026' };
 
-const SUITES = ['./app.test', './identity.test', './print.test', './auth.test', './sync.test', './drive.test', './columns.test', './columns2.test', './entity-leak.test', './fx.test']
+const SUITES = ['./app.test', './identity.test', './print.test', './auth.test', './sync.test', './drive.test', './columns.test', './columns2.test', './entity-leak.test', './fx.test', './patch.test']
   .map(m => require(m));
 
 (async () => {

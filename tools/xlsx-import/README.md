@@ -74,6 +74,28 @@ move the date.
 **One spelling per party.** `Al Zailee` and `Al  Zailee` are the same customer
 and merge. `AL ZAILEE-ADEN` is a different customer and keeps its own record.
 
+## Correcting a system people are already using
+
+Replacing the books is right for a first import and wrong once anyone has been
+working: it throws away their edits along with the mistakes. `make-patch.py`
+diffs two workbooks and writes a **correction file** instead — the transactions
+that changed, named by the workbook's own Transaction ID, and only the fields to
+put right.
+
+```
+python3 make-patch.py old.xlsx new.xlsx     # writes environmsafe-corrections.json
+```
+
+The live system applies it under System → Backup & sync → **Apply a correction
+file**. It shows what it would change and waits, saves the current books to a
+file, then changes only the named field on the named records — no amounts, no
+dates, no parties, and nothing at all on a record the file does not name. Only
+the corrected records get a new timestamp, so only they travel to the other
+devices. Running the same file twice does nothing the second time.
+
+It deliberately cannot create or delete a transaction. Those are decisions, and
+a file should not make them quietly.
+
 ## The house rule it checks
 
 A project belongs to a customer and says so: its name starts with that

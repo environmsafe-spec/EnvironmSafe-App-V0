@@ -3558,7 +3558,10 @@ function viewData(m) {
   m.appendChild(c1);
 
   const c2 = el("div", { class:"card" });
-  c2.innerHTML = `<h2>Restore / merge</h2><p class="card-note">
+  c2.innerHTML = `<h2>Restore, merge & correct</h2><p class="card-note">
+    <b>Apply a correction file</b> puts a named list of records right — the project on a
+    handful of transactions, say — and leaves every other field, and every edit made here,
+    exactly as it is. It is the one to use once people are working.<br>
     <b>Merge</b> adds records from another user's backup and keeps the newest version of anything edited
     on both sides — this is how the 5 users stay in step today.
     <b>Replace</b> throws away what is on this device first.</p>`;
@@ -3574,6 +3577,32 @@ function viewData(m) {
           let incoming;
           try { incoming = JSON.parse(String(rd.result)); }
           catch (e) { return toast("That is not a valid backup file."); }
+          if (incoming && incoming.kind === "environmsafe-corrections") {
+            if (mode !== "fix") return toast("That is a correction file — use Apply a correction file.");
+            const plan = planCorrections(incoming);
+            const lines = plan.change.slice(0, 12).map(c =>
+              `  ${c.tx.sourceRef || c.tx.id}:  ${c.from || "(none)"}  ->  ${c.to}`).join("\n");
+            const more = plan.change.length > 12 ? `\n  … and ${plan.change.length - 12} more` : "";
+            if (!plan.change.length)
+              return toast(plan.missing.length
+                ? `Nothing to change — ${plan.missing.length} of these records are not on this device.`
+                : "Nothing to change — every record already reads as the file says.");
+            if (!confirm(
+              `Change the project on ${plan.change.length} transaction${plan.change.length === 1 ? "" : "s"}.\n` +
+              `Nothing else is touched — no amounts, dates, customers or your own edits.\n\n` +
+              lines + more + "\n\n" +
+              (plan.newProjects.size ? `${plan.newProjects.size} new project${plan.newProjects.size === 1 ? "" : "s"} will be created.\n` : "") +
+              (plan.already.length ? `${plan.already.length} already correct, left alone.\n` : "") +
+              (plan.missing.length ? `${plan.missing.length} not found on this device, skipped.\n` : ""))) return;
+            const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+            saveFile(`environmsafe-before-correction-${stamp}.json`, JSON.stringify(DB, null, 1));
+            const done = applyCorrections(incoming);
+            toast(`Corrected ${done.change.length} transaction${done.change.length === 1 ? "" : "s"}` +
+                  (done.missing.length ? ` · ${done.missing.length} not found` : ""));
+            render();
+            return;
+          }
+          if (mode === "fix") return toast("That is not a correction file.");
           if (!incoming || !incoming.transactions) return toast("That file has no EnvironmSafe data.");
           if (mode === "replace") {
             if (!confirm("Replace ALL data on this device?")) return;
@@ -3604,6 +3633,7 @@ function viewData(m) {
     };
     return b;
   };
+  c2.appendChild(mkImport("fix","Apply a correction file","gold"));
   c2.appendChild(mkImport("merge","Merge a backup","gold"));
   c2.appendChild(mkImport("books","Replace the books","ghost"));
   c2.appendChild(mkImport("replace","Replace all data","ghost"));
@@ -3638,6 +3668,74 @@ function viewData(m) {
   };
   c4.appendChild(b4);
   m.appendChild(c4);
+}
+
+/* ---------- corrections ----------
+   Replacing the books is the right move for a fresh import and the wrong one
+   once people have been working. A correction file names a handful of
+   transactions by the reference they were imported with and lists only the
+   fields to put right; everything else on the record — including edits made
+   here by hand — is left exactly as it is.
+
+   It is deliberately narrow. It never creates a transaction, never deletes one,
+   and never touches money, dates or parties: those are decisions, and a file
+   should not make them quietly. Today it moves a transaction to another
+   project, which is the mistake that a spreadsheet's fill-down makes and that
+   no total will ever reveal. */
+
+/** Which of our records is this correction talking about? */
+function findBySourceRef(ref) {
+  const r = String(ref || "").trim();
+  if (!r) return null;
+  return DB.transactions.find(x => (x.sourceRef || "") === r)
+      || DB.transactions.find(x => (x.refNo || "") === r)
+      || DB.transactions.find(x => (x.id || "") === r)
+      || null;
+}
+
+/** The project of this name, made if we have never seen it. */
+function projectByName(name) {
+  const want = String(name || "").trim();
+  if (!want) return null;
+  const hit = rowsOf("projects").find(p =>
+    String(p.nameEn || "").trim().toLowerCase() === want.toLowerCase());
+  if (hit) return hit;
+  const made = { id: nextId("PRJ"), uid: newUid(), nameEn: want, status: "active",
+                 budget: 0, notes: "added by a correction file",
+                 createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  DB.projects.push(made);
+  return made;
+}
+
+/** Works out what a correction file would do, without doing any of it. */
+function planCorrections(patch) {
+  const plan = { change: [], already: [], missing: [], newProjects: new Set() };
+  const known = new Set(rowsOf("projects").map(p =>
+    String(p.nameEn || "").trim().toLowerCase()));
+  (patch.rows || []).forEach(row => {
+    const tx = findBySourceRef(row.sourceRef);
+    if (!tx) return plan.missing.push(row.sourceRef);
+    const want = String(row.project || "").trim();
+    const have = (byId("projects", tx.projectId) || {}).nameEn || "";
+    if (have.trim().toLowerCase() === want.toLowerCase()) plan.already.push(row.sourceRef);
+    else {
+      plan.change.push({ tx, from: have, to: want });
+      if (!known.has(want.toLowerCase())) plan.newProjects.add(want);
+    }
+  });
+  return plan;
+}
+
+function applyCorrections(patch) {
+  const plan = planCorrections(patch);
+  const now = new Date().toISOString();
+  plan.change.forEach(c => {
+    const p = projectByName(c.to);
+    c.tx.projectId = p ? p.id : "";
+    c.tx.updatedAt = now;            // so, and only so, this row syncs onward
+  });
+  save();
+  return plan;
 }
 
 /* The books are the day-to-day records: transactions and the master lists they
