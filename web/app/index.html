@@ -3580,8 +3580,11 @@ function viewData(m) {
           if (incoming && incoming.kind === "environmsafe-corrections") {
             if (mode !== "fix") return toast("That is a correction file — use Apply a correction file.");
             const plan = planCorrections(incoming);
+            // The record's own number is shown next to the file's, because they
+            // are not the same number and seeing both is the only way to be sure.
             const lines = plan.change.slice(0, 12).map(c =>
-              `  ${c.tx.sourceRef || c.tx.id}:  ${c.from || "(none)"}  ->  ${c.to}`).join("\n");
+              `  ${c.tx.id} (file ${c.tx.sourceRef || "?"}, ${c.tx.date}, ${fmt(rawAmount(c.tx))} ${
+                txCurrency(c.tx)}):\n      ${c.from || "(none)"}  ->  ${c.to}`).join("\n");
             const more = plan.change.length > 12 ? `\n  … and ${plan.change.length - 12} more` : "";
             if (!plan.change.length)
               return toast(plan.missing.length
@@ -3593,12 +3596,16 @@ function viewData(m) {
               lines + more + "\n\n" +
               (plan.newProjects.size ? `${plan.newProjects.size} new project${plan.newProjects.size === 1 ? "" : "s"} will be created.\n` : "") +
               (plan.already.length ? `${plan.already.length} already correct, left alone.\n` : "") +
-              (plan.missing.length ? `${plan.missing.length} not found on this device, skipped.\n` : ""))) return;
+              (plan.missing.length ? `${plan.missing.length} not found on this device, skipped.\n` : "") +
+              (plan.wrong.length ? `\n${plan.wrong.length} REFUSED — the record found does not match the ` +
+                `date and amount in the file:\n` +
+                plan.wrong.slice(0, 5).map(w => `  ${w.ref} -> ${w.id}: ${w.why}`).join("\n") + "\n" : ""))) return;
             const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
             saveFile(`environmsafe-before-correction-${stamp}.json`, JSON.stringify(DB, null, 1));
             const done = applyCorrections(incoming);
             toast(`Corrected ${done.change.length} transaction${done.change.length === 1 ? "" : "s"}` +
-                  (done.missing.length ? ` · ${done.missing.length} not found` : ""));
+                  (done.missing.length ? ` · ${done.missing.length} not found` : "") +
+                  (done.wrong.length ? ` · ${done.wrong.length} refused` : ""));
             render();
             return;
           }
@@ -3683,14 +3690,31 @@ function viewData(m) {
    project, which is the mistake that a spreadsheet's fill-down makes and that
    no total will ever reveal. */
 
-/** Which of our records is this correction talking about? */
+/** Which of our records is this correction talking about?
+    The reference is the one the record was imported with — the spreadsheet's own
+    number, which is NOT the number this system gave it. A workbook that skips a
+    blank row makes the two drift apart, so they must never be confused. */
 function findBySourceRef(ref) {
   const r = String(ref || "").trim();
   if (!r) return null;
   return DB.transactions.find(x => (x.sourceRef || "") === r)
       || DB.transactions.find(x => (x.refNo || "") === r)
-      || DB.transactions.find(x => (x.id || "") === r)
       || null;
+}
+
+/** Does this record actually look like the one the correction describes?
+    The date and the amount are the fingerprint. A correction that matched the
+    wrong record fails this and is refused, rather than quietly moving somebody
+    else's money to the wrong project. */
+function correctionFits(tx, row) {
+  const wantDate = String(row.date || "").trim();
+  const wantAmt  = row.amount == null ? null : num(row.amount);
+  const why = [];
+  if (wantDate && String(tx.date || "").trim() !== wantDate)
+    why.push(`date ${tx.date || "(none)"} ≠ ${wantDate}`);
+  if (wantAmt != null && Math.abs(rawAmount(tx) - wantAmt) > 0.005)
+    why.push(`amount ${fmt(rawAmount(tx))} ≠ ${fmt(wantAmt)}`);
+  return why.join(", ");
 }
 
 /** The project of this name, made if we have never seen it. */
@@ -3709,12 +3733,14 @@ function projectByName(name) {
 
 /** Works out what a correction file would do, without doing any of it. */
 function planCorrections(patch) {
-  const plan = { change: [], already: [], missing: [], newProjects: new Set() };
+  const plan = { change: [], already: [], missing: [], wrong: [], newProjects: new Set() };
   const known = new Set(rowsOf("projects").map(p =>
     String(p.nameEn || "").trim().toLowerCase()));
   (patch.rows || []).forEach(row => {
     const tx = findBySourceRef(row.sourceRef);
     if (!tx) return plan.missing.push(row.sourceRef);
+    const off = correctionFits(tx, row);
+    if (off) return plan.wrong.push({ ref: row.sourceRef, id: tx.id, why: off });
     const want = String(row.project || "").trim();
     const have = (byId("projects", tx.projectId) || {}).nameEn || "";
     if (have.trim().toLowerCase() === want.toLowerCase()) plan.already.push(row.sourceRef);

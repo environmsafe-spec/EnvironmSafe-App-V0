@@ -86,6 +86,17 @@ put right.
 python3 make-patch.py old.xlsx new.xlsx     # writes environmsafe-corrections.json
 ```
 
+**The two systems do not number rows the same way.** The workbook numbers every
+row it has; the converter numbers only the rows it keeps, so the two drift apart
+at every blank row — `TRX-000399` in the sheet is `TRX-0394` in the system, and
+by the end of the file the gap is five. Matching is therefore on the reference
+each record was imported with, never on the local id, and a local id that
+happens to look like a workbook reference is deliberately not matched.
+
+Because that is easy to get wrong and expensive to get wrong, each correction
+also carries the **date and amount** of the row it means. A record that does not
+match both is refused and reported rather than changed.
+
 The live system applies it under System → Backup & sync → **Apply a correction
 file**. It shows what it would change and waits, saves the current books to a
 file, then changes only the named field on the named records — no amounts, no

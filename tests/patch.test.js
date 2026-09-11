@@ -101,6 +101,78 @@ async function run(ctx) {
   check('applying the same file again does nothing',
         twice.changed === 0 && twice.grew === 0, JSON.stringify(twice));
 
+  /* ---- the file's numbering is not this system's numbering ---- */
+  // The workbook numbers its rows and the system numbers its own; a blank row in
+  // the sheet makes the two drift apart. TRX-000399 in the file is TRX-0394
+  // here. A correction must follow the imported reference, never the local id,
+  // and must refuse anything whose date and amount disagree.
+  await pg.evaluate(() => {
+    // a decoy: a record whose OWN id is the file's reference, holding other money
+    DB.transactions.push({ id: 'TRX-000399', uid: 'u-decoy', sourceRef: '',
+      date: '2020-01-01', type: 'EXPENSE', debit: 5, credit: 0, projectId: 'PRJ-OLD',
+      currency: 'USD', fxRate: 1, status: 'Approved', customerId: '', supplierId: '',
+      employeeId: '', accountId: '', refNo: 'DECOY', notes: 'not the one',
+      updatedAt: '2020-01-01T00:00:00.000Z' });
+    save();
+  });
+  const decoyBefore = await pg.evaluate(() =>
+    JSON.stringify(DB.transactions.find(x => x.id === 'TRX-000399')));
+  const fingerprinted = { kind: 'environmsafe-corrections', rows: [
+    { sourceRef: 'TRX-000399', project: 'Moved By Fingerprint',
+      date: '2026-05-01', amount: 700 }
+  ]};
+  const okPlan = await pg.evaluate(p => {
+    const r = planCorrections(p);
+    return { change: r.change.length, hit: r.change[0] && r.change[0].tx.id, wrong: r.wrong.length };
+  }, fingerprinted);
+  check('a correction follows the imported reference, not a local id that looks like it',
+        okPlan.change === 1 && okPlan.hit === 'TRX-A' && okPlan.wrong === 0,
+        JSON.stringify(okPlan));
+
+  // now the same reference, but the file claims a different amount
+  const badPlan = await pg.evaluate(() => {
+    const r = planCorrections({ kind: 'environmsafe-corrections', rows: [
+      { sourceRef: 'TRX-000400', project: 'Should Not Happen',
+        date: '2026-05-02', amount: 999999 }] });
+    return { change: r.change.length, wrong: r.wrong.length, why: (r.wrong[0] || {}).why };
+  });
+  check('a correction whose amount disagrees is refused, not applied',
+        badPlan.change === 0 && badPlan.wrong === 1 && /amount/.test(badPlan.why || ''),
+        JSON.stringify(badPlan));
+
+  const badDate = await pg.evaluate(() => {
+    const r = planCorrections({ kind: 'environmsafe-corrections', rows: [
+      { sourceRef: 'TRX-000400', project: 'Should Not Happen',
+        date: '1999-01-01', amount: 1250 }] });
+    return { change: r.change.length, wrong: r.wrong.length, why: (r.wrong[0] || {}).why };
+  });
+  check('and so is one whose date disagrees',
+        badDate.change === 0 && badDate.wrong === 1 && /date/.test(badDate.why || ''),
+        JSON.stringify(badDate));
+
+  // The sharpest version of the same trap: a record with NO imported reference,
+  // whose own id is the file's reference, and whose date and amount agree too.
+  // Only the numbering spaces tell them apart, so it must still not be matched.
+  const trap = await pg.evaluate(() => {
+    DB.transactions.push({ id: 'TRX-000500', uid: 'u-trap', sourceRef: '',
+      date: '2026-07-07', type: 'EXPENSE', debit: 42, credit: 0, projectId: 'PRJ-OLD',
+      currency: 'USD', fxRate: 1, status: 'Approved', customerId: '', supplierId: '',
+      employeeId: '', accountId: '', refNo: '', notes: 'entered on the phone',
+      updatedAt: '2026-07-07T00:00:00.000Z' });
+    save();
+    const r = planCorrections({ kind: 'environmsafe-corrections', rows: [
+      { sourceRef: 'TRX-000500', project: 'Should Not Happen',
+        date: '2026-07-07', amount: 42 }] });
+    return { change: r.change.length, missing: r.missing.length };
+  });
+  check('a local id that happens to look like a file reference is never matched',
+        trap.change === 0 && trap.missing === 1, JSON.stringify(trap));
+
+  await pg.evaluate(p => applyCorrections(p), fingerprinted);
+  check('the decoy record is left completely alone',
+        (await pg.evaluate(() =>
+          JSON.stringify(DB.transactions.find(x => x.id === 'TRX-000399')))) === decoyBefore);
+
   /* ---- several records moving to the SAME new project ---- */
   // The real correction file sends five transactions to UNHCR-GEN-001. If each
   // row made its own project, the list would fill with five identical entries
