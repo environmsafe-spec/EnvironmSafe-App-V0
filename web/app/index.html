@@ -1460,28 +1460,107 @@ function txTable(list, opts = {}) {
 }
 
 function editTx(tx) {
-  const ty = typeOf(tx.type);
+  const was = { isAsset: tx.isAsset, status: tx.status };
+  /* Every field the entry screen offers, so a transaction entered in a hurry —
+     or imported from a spreadsheet — can be put right here rather than deleted
+     and typed again. The same rules apply on the way out as on the way in: the
+     type decides which column the money sits in, the account decides the
+     currency, a cash movement needs an account, and a near-duplicate still
+     asks. */
   modal("Edit " + tx.id, [
-    { k:"date", l:"Date", t:"date", v:tx.date },
-    { k:"amount", l:"Amount", t:"number", v:rawAmount(tx) },
-    { k:"fxRate", l:"Rate to USD (" + txCurrency(tx) + " per 1 USD)", t:"number", v:tx.fxRate || "" },
-    { k:"status", l:"Status", t:"select", opts:STATUSES, v:tx.status },
-    { k:"caseNo", l:"Case / file no", v:tx.caseNo },
-    { k:"refNo", l:"Reference no", v:tx.refNo },
-    { k:"docRef", l:"Document file / link", v:tx.docRef },
-    { k:"notes", l:"Notes", t:"textarea", v:tx.notes }
-  ], vals => {
+    { k:"date",       l:"Date | التاريخ", t:"date", v:tx.date, req:true },
+    { k:"type",       l:"Transaction type | نوع الحركة", t:"select", blank:false,
+                      opts:TXTYPES.map(x => x.v), v:tx.type },
+    { k:"phase",      l:"Phase | المرحلة", t:"select", opts:PHASES, v:tx.phase },
+    { k:"caseNo",     l:"Case / file no | رقم الملف", v:tx.caseNo },
+
+    { k:"customerId", l:"Customer | العميل",   t:"ref", ref:"customers",  v:tx.customerId },
+    { k:"supplierId", l:"Supplier | المورد",   t:"ref", ref:"suppliers",  v:tx.supplierId },
+    { k:"employeeId", l:"Employee | الموظف",   t:"ref", ref:"employees",  v:tx.employeeId },
+    { k:"projectId",  l:"Project | المشروع",   t:"ref", ref:"projects",   v:tx.projectId },
+    { k:"accountId",  l:"Bank / cash account | الحساب", t:"ref", ref:"accounts", v:tx.accountId },
+    { k:"categoryId", l:"Expense category | البند", t:"ref", ref:"categories", v:tx.categoryId },
+
+    { k:"itemId",     l:"Product / service | المنتج", t:"ref", ref:"items", v:tx.itemId },
+    { k:"qty",        l:"Quantity | الكمية",    t:"number", v:tx.qty || "" },
+    { k:"unitPrice",  l:"Unit price | سعر الوحدة", t:"number", v:tx.unitPrice || "" },
+    { k:"discount",   l:"Line discount | خصم السطر", t:"number", v:tx.discount || "" },
+    { k:"amount",     l:"Amount | المبلغ",      t:"number", v:rawAmount(tx) },
+    { k:"currency",   l:"Currency | العملة (follows the account when one is chosen)",
+                      t:"select", blank:false, opts:CURRENCIES, v:txCurrency(tx) },
+    { k:"fxRate",     l:"Rate to USD | سعر الصرف", t:"number", v:tx.fxRate || "" },
+
+    { k:"isAsset",    l:"Is this a fixed asset? | أصل ثابت؟", t:"select", blank:false,
+                      opts:["No","Yes"], v:tx.isAsset || "No" },
+    { k:"assetTag",   l:"Asset tag / serial | رقم الأصل", v:(assetOfTx(tx) || {}).tag || "" },
+    { k:"assetLocation", l:"Location | الموقع", v:(assetOfTx(tx) || {}).location || "" },
+
+    { k:"status",     l:"Status | الحالة", t:"select", blank:false, opts:STATUSES, v:tx.status },
+    { k:"refNo",      l:"Reference no | رقم المرجع", v:tx.refNo },
+    { k:"againstRef", l:"Against document | مقابل مستند", v:tx.againstRef },
+    { k:"docType",    l:"Document type | نوع المستند", t:"select", opts:DOCTYPES, v:tx.docType },
+    { k:"docRef",     l:"Document file / link | المستند", v:tx.docRef },
+    { k:"notes",      l:"Notes | ملاحظات", t:"textarea", v:tx.notes }
+  ], f => {
     if (!canEdit()) return toast("Your role is read-only.");
-    if (vals.status === "Approved" && tx.status === "Draft" && !canApprove())
+    if (f.status === "Approved" && was.status === "Draft" && !canApprove())
       return toast("Only a Reviewer can approve.");
-    Object.assign(tx, vals, { fxRate:num(vals.fxRate) });
-    const amt = num(vals.amount);
-    tx.debit  = ty.side === "debit"  ? amt : 0;
-    tx.credit = ty.side === "credit" ? amt : 0;
-    tx.updatedAt = new Date().toISOString();
-    save(); render(); toast("Updated " + tx.id);
+
+    const ty = typeOf(f.type);
+    const amount = num(f.amount);
+    if (ty.fin && amount <= 0) return toast("Enter an amount greater than zero.");
+    if (ty.cash && !f.accountId) return toast("Select the bank or cash account used.");
+    if (f.isAsset === "Yes" && !isPurchase(f.type))
+      return toast("Only a purchase (supplier bill, expense or payment out) can be an asset.");
+
+    // The same duplicate guard as the entry screen: editing a row into the shape
+    // of one that already exists is exactly as costly as typing it twice.
+    const warn = duplicateTxWarning({ id:tx.id, date:f.date, type:f.type, amount, refNo:f.refNo,
+      customerId:f.customerId, supplierId:f.supplierId, employeeId:f.employeeId });
+    if (warn && !confirm(warn)) return;
+
+    // An account holds one currency, so choosing one settles the question.
+    const acc = byId("accounts", f.accountId);
+    const currency = acc ? (acc.currency || CO().currency || "YER") : (f.currency || tx.currency);
+
+    Object.assign(tx, {
+      date:f.date, type:f.type, phase:f.phase || ty.phase, caseNo:(f.caseNo || "").trim(),
+      customerId:f.customerId, supplierId:f.supplierId, employeeId:f.employeeId,
+      projectId:f.projectId, accountId:f.accountId, categoryId:f.categoryId,
+      itemId:f.itemId, qty:num(f.qty), unitPrice:num(f.unitPrice), discount:num(f.discount),
+      isAsset:f.isAsset, currency, fxRate:num(f.fxRate),
+      debit:  ty.side === "debit"  ? amount : 0,
+      credit: ty.side === "credit" ? amount : 0,
+      status:f.status, refNo:f.refNo, againstRef:f.againstRef,
+      docType:f.docType, docRef:f.docRef, notes:f.notes,
+      updatedAt: new Date().toISOString()
+    });
+
+    // Keep the asset register in step: a purchase that has just become an asset
+    // joins it, one that is no longer an asset leaves, and one whose cost or
+    // date was corrected carries the correction through.
+    let note = "";
+    const linked = assetOfTx(tx);
+    if (f.isAsset === "Yes" && !linked) {
+      const a = registerAssetFrom(tx, f);
+      note = ` · asset ${a.id} added to the register`;
+    } else if (f.isAsset === "Yes" && linked) {
+      Object.assign(linked, { cost:rawAmount(tx), acquiredOn:tx.date,
+        supplierId:tx.supplierId || "", tag:(f.assetTag || "").trim(),
+        serial:(f.assetTag || "").trim(), location:(f.assetLocation || "").trim(),
+        updatedAt:tx.updatedAt });
+      note = ` · asset ${linked.id} updated`;
+    } else if (f.isAsset !== "Yes" && linked) {
+      DB.assets = DB.assets.filter(a => a.id !== linked.id);
+      note = ` · asset ${linked.id} removed from the register`;
+    }
+
+    save(); render(); toast("Updated " + tx.id + note);
   });
 }
+
+/** The asset this purchase put on the register, if it put one there. */
+const assetOfTx = tx => rowsOf("assets").find(a => a.sourceTx === tx.id) || null;
 
 /* =========================================================================
    Ledger (all transactions, filterable)
@@ -3863,7 +3942,8 @@ function modal(title, fields, onSave) {
     let inner;
     const v = f.v ?? "";
     if (f.t === "textarea") inner = `<textarea name="${f.k}" rows="2">${esc(v)}</textarea>`;
-    else if (f.t === "select") inner = `<select name="${f.k}">${["", ...(f.opts || [])].map(o =>
+    else if (f.t === "select") inner = `<select name="${f.k}">${
+      [...(f.blank === false ? [] : [""]), ...(f.opts || [])].map(o =>
       `<option ${String(o) === String(v) ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
     else if (f.t === "ref") inner = refSelect(f.k, f.ref, v);
     else inner = `<input type="${f.t || "text"}" ${f.t === "number" ? 'step="0.01"' : ""}
