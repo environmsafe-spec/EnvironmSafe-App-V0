@@ -1810,7 +1810,52 @@ function parseCsv(text) {
    Reports
    ========================================================================= */
 
-let rep = { from:"", to:"", entity:"" };
+let rep = { from:"", to:"", entity:"", sel:{} };
+
+/* ---------- choosing many, or all ----------
+   A report question is rarely about one thing. "What did we pay the three
+   fabricators on the two Go Green jobs, salaries and advances only" is one
+   question, and answering it by running six reports and adding them up is how
+   arithmetic mistakes get made.
+
+   So every dimension of a report is a multiple choice, and an empty choice
+   means all of it — which keeps the default exactly as it was. */
+const SEL_DIMS = {
+  employee: { label:"Employees",  table:"employees",  get:x => x.employeeId },
+  project:  { label:"Projects",   table:"projects",   get:x => x.projectId  },
+  customer: { label:"Customers",  table:"customers",  get:x => x.customerId },
+  supplier: { label:"Suppliers",  table:"suppliers",  get:x => x.supplierId },
+  account:  { label:"Accounts",   table:"accounts",   get:x => x.accountId  },
+  category: { label:"Categories", table:"categories", get:x => x.categoryId },
+  type:     { label:"Types",      values:() => TXTYPES.map(x => x.v), get:x => x.type },
+  currency: { label:"Currencies", values:() => currencyChoices(),     get:x => txCurrency(x) },
+};
+
+const selOf   = k => (rep.sel && rep.sel[k]) || [];
+/** Nothing chosen means everything, so an untouched report is unfiltered. */
+const selHas  = (k, v) => { const s = selOf(k); return !s.length || s.includes(v || ""); };
+const selAny  = () => Object.keys(SEL_DIMS).some(k => selOf(k).length);
+
+/** Does this transaction pass every choice made on the report toolbar? */
+function selOk(x) {
+  return Object.keys(SEL_DIMS).every(k => selHas(k, SEL_DIMS[k].get(x)));
+}
+
+/** The options a dimension offers, as {v, label}. */
+function selOptions(k) {
+  const d = SEL_DIMS[k];
+  if (d.values) return d.values().map(v => ({ v, label:v }));
+  return rowsOf(d.table).map(r => ({ v:r.id, label:r.nameEn || r.id }));
+}
+
+/** What the button says, and what a printed report needs to admit it is showing. */
+function selSummary(k) {
+  const chosen = selOf(k);
+  if (!chosen.length) return "All";
+  const opts = selOptions(k);
+  const names = chosen.map(v => (opts.find(o => o.v === v) || {}).label || v);
+  return names.length <= 2 ? names.join(", ") : `${names.length} selected`;
+}
 // Which report "entity" was last chosen for. Switching to a different report —
 // via the sidebar, not its own Run button — must not carry a stale selection
 // with it: a customer picked on the statement silently filtered the asset
@@ -2010,6 +2055,77 @@ function footRow(cols, leadCount, sums) {
     "</tr>";
 }
 
+/* Tick as many as you like, or none for all of them. With sixty-nine projects
+   and thirty-eight people a list alone is not usable, so it searches, and All
+   and None are one click. */
+function openMultiPick(dim, onApply) {
+  const d = SEL_DIMS[dim];
+  const opts = selOptions(dim);
+  let chosen = new Set(selOf(dim));
+
+  const bg = el("div", { class:"modal-bg" });
+  const box = el("div", { class:"modal" });
+  box.appendChild(el("h2", {}, d.label));
+  box.appendChild(el("p", { class:"card-note" },
+    "Tick the ones you want. Tick nothing and the report covers all of them."));
+
+  const search = el("input", { type:"search", placeholder:"Search…", style:"width:100%;margin:.6rem 0" });
+  box.appendChild(search);
+
+  const bar = el("div", { style:"display:flex;gap:.4rem;margin-bottom:.5rem" });
+  const bAll = el("button", { class:"btn ghost sm", type:"button" }, "All");
+  const bNone = el("button", { class:"btn ghost sm", type:"button" }, "None");
+  bar.appendChild(bAll); bar.appendChild(bNone);
+  box.appendChild(bar);
+
+  const list = el("div", { style:"max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:4px;padding:.4rem" });
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    list.innerHTML = "";
+    opts.filter(o => !q || o.label.toLowerCase().includes(q)).forEach(o => {
+      const row = el("label", { style:"display:flex;gap:.5rem;align-items:center;padding:.22rem .3rem;cursor:pointer" });
+      const cb = el("input", { type:"checkbox" });
+      cb.checked = chosen.has(o.v);
+      cb.onchange = () => { cb.checked ? chosen.add(o.v) : chosen.delete(o.v); count(); };
+      row.appendChild(cb);
+      row.appendChild(el("span", {}, esc(o.label)));
+      list.appendChild(row);
+    });
+    if (!list.children.length)
+      list.appendChild(el("div", { class:"empty" }, "Nothing matches that search."));
+  };
+  const tally = el("div", { class:"card-note", style:"margin-top:.4rem" });
+  const count = () => { tally.textContent = chosen.size
+    ? `${chosen.size} of ${opts.length} selected`
+    : `Nothing ticked — the report will cover all ${opts.length}.`; };
+  search.oninput = draw;
+  // All and None only affect what the search is currently showing, so a filtered
+  // "All" adds that group rather than silently selecting the other sixty.
+  bAll.onclick = () => { const q = search.value.trim().toLowerCase();
+    opts.filter(o => !q || o.label.toLowerCase().includes(q)).forEach(o => chosen.add(o.v));
+    draw(); count(); };
+  bNone.onclick = () => { chosen = new Set(); draw(); count(); };
+
+  box.appendChild(list); box.appendChild(tally);
+  draw(); count();
+
+  const act = el("div", { class:"actions" });
+  const cancel = el("button", { class:"btn ghost", type:"button" }, t("cancel"));
+  cancel.onclick = () => bg.remove();
+  const apply = el("button", { class:"btn gold", type:"button" }, "Apply");
+  apply.onclick = () => {
+    rep.sel = Object.assign({}, rep.sel, { [dim]: [...chosen] });
+    bg.remove();
+    if (onApply) onApply();
+  };
+  act.appendChild(cancel); act.appendChild(apply);
+  box.appendChild(act);
+  bg.appendChild(box);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  document.body.appendChild(bg);
+  search.focus();
+}
+
 /** The picker: tick columns on or off, move them with the arrows, Apply to redraw. */
 function openColumnPicker(reportId, title, body, onApply) {
   const p = colPrefs(reportId, body);
@@ -2083,7 +2199,10 @@ function viewReport(m, kind) {
     printHeader(m, titles[kind], `${rep.from || "start"} → ${rep.to || today()}` +
       (FX_ON ? " · all currencies converted to USD"
              : CUR ? " · " + CUR
-             : currenciesInUse().length > 1 ? " · one section per currency" : ""));
+             : currenciesInUse().length > 1 ? " · one section per currency" : "") +
+      // A filtered report that does not say so is a report waiting to be misread.
+      Object.keys(SEL_DIMS).filter(k => selOf(k).length)
+        .map(k => ` · ${SEL_DIMS[k].label}: ${selSummary(k)}`).join(""));
 
   const bar = el("div", { class:"toolbar noprint" });
   bar.appendChild(fld("From | من", `<input type="date" id="r_from" value="${esc(rep.from)}">`));
@@ -2093,12 +2212,44 @@ function viewReport(m, kind) {
   if (entTbl) bar.appendChild(fld("Select | اختر",
     `<select id="r_ent"><option value="">— all —</option>${rowsOf(entTbl).map(r =>
       `<option value="${esc(r.id)}" ${r.id === rep.entity ? "selected" : ""}>${esc(r.nameEn)}</option>`).join("")}</select>`));
+
+  // Which questions this report can be narrowed by. Its own subject comes first.
+  const DIMS_FOR = {
+    employee: ["employee","project","type","currency"],
+    project:  ["project","customer","employee","type","currency"],
+    customer: ["customer","project","type","currency"],
+    supplier: ["supplier","project","type","currency"],
+    bank:     ["account","project","type","currency"],
+    summary:  ["project","customer","type","currency"],
+    item:     ["customer","supplier","type","currency"],
+  };
+  (DIMS_FOR[kind] || []).forEach(dim => {
+    // fld() writes its inner HTML, so the button is appended rather than passed in.
+    const wrap = el("div", { class:"field" });
+    wrap.appendChild(el("label", {}, esc(SEL_DIMS[dim].label)));
+    const b = el("button", { class:"btn ghost sm", type:"button" },
+      `${SEL_DIMS[dim].label}: ${selSummary(dim)}`);
+    b.onclick = () => openMultiPick(dim, () => {
+      rep.from = $("#r_from").value; rep.to = $("#r_to").value;
+      if (entTbl) rep.entity = $("#r_ent").value;
+      render();
+    });
+    wrap.appendChild(b);
+    bar.appendChild(wrap);
+  });
+
   const go2 = el("button", { class:"btn sm" }, "Run");
   go2.onclick = () => {
-    rep = { from:$("#r_from").value, to:$("#r_to").value, entity: entTbl ? $("#r_ent").value : "" };
+    rep = { from:$("#r_from").value, to:$("#r_to").value,
+            entity: entTbl ? $("#r_ent").value : "", sel: rep.sel };
     render();
   };
   bar.appendChild(go2);
+  if (selAny()) {
+    const clear = el("button", { class:"btn ghost sm" }, "Clear filters");
+    clear.onclick = () => { rep = Object.assign({}, rep, { sel:{} }); render(); };
+    bar.appendChild(clear);
+  }
   m.appendChild(bar);
 
   if (kind === "asset")    return repAssets(m);
@@ -2734,7 +2885,7 @@ function officialDoc(lines, refNo) {
 }
 
 function repSummary(m) {
-  const list = txs({ from:rep.from, to:rep.to });
+  const list = txs({ from:rep.from, to:rep.to }).filter(selOk);
   const revenue = netRevenue(list);
   const cost = netCost(list);
   const salesReturns = sum(list.filter(isSalesReturn), amountOf);
@@ -2787,7 +2938,17 @@ function repSummary(m) {
    print — instead of one total that means nothing. Pick a single currency and you
    get that one; pick the converted view and you get one section in USD. */
 function perCurrency(m, draw) {
-  const list = currenciesInUse();
+  const picked = selOf("currency");
+  let list = currenciesInUse();
+  if (picked.length) list = list.filter(c => picked.includes(c));
+  // One currency chosen on the toolbar is as good as choosing it in the top bar.
+  if (!CUR && picked.length === 1) {
+    const prevCur = CUR, prevFx = FX_ON;
+    CUR = picked[0]; FX_ON = false;
+    draw(m);
+    CUR = prevCur; FX_ON = prevFx;
+    return;
+  }
   if (CUR || list.length <= 1) return draw(m);
   list.forEach((c, i) => {
     const prevCur = CUR, prevFx = FX_ON;
@@ -2806,11 +2967,11 @@ function repPartyOne(m, tbl) {
   const kind = isCus ? "customer" : "supplier";
   const cols = reportCols(kind);
   const allCols = [...cols.lead, ...visibleBody(kind, cols.body), ...cols.tail];
-  const list = rep.entity ? [byId(tbl, rep.entity)].filter(Boolean) : rowsOf(tbl);
+  const list = repRows(isCus ? "customer" : "supplier", tbl);
   if (!list.length) { m.appendChild(el("div", { class:"card" }, `<div class="empty">${esc(t("none"))}</div>`)); return; }
   list.forEach(p => {
     const key = isCus ? "customerId" : "supplierId";
-    const all = txs({ [key]:p.id });
+    const all = txs({ [key]:p.id }).filter(selOk);
     const before = all.filter(x => rep.from && x.date < rep.from);
     // charges raise the balance, settlements lower it; a return is a settlement,
     // a refund undoes one
@@ -2876,11 +3037,11 @@ function repProject(m) { perCurrency(m, repProjectOne); }
 function repProjectOne(m) {
   const cols = reportCols("project");
   const allCols = [...cols.lead, ...visibleBody("project", cols.body)];
-  const list = rep.entity ? [byId("projects", rep.entity)].filter(Boolean) : rowsOf("projects");
+  const list = repRows("project", "projects");
   const w = el("div", { class:"tablewrap" });
   if (!list.length) { w.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; m.appendChild(w); return; }
   const rows = list.map(p => {
-    const l = txs({ projectId:p.id, from:rep.from, to:rep.to });
+    const l = txs({ projectId:p.id, from:rep.from, to:rep.to }).filter(selOk);
     const rev = netRevenue(l), cst = netCost(l);
     const margin = rev ? ((rev - cst) / rev * 100) : 0;
     const data = { name: esc(p.nameEn), customer: esc(nameOf("customers", p.customerId)),
@@ -2890,6 +3051,15 @@ function repProjectOne(m) {
   }).join("");
   w.innerHTML = `<table><thead>${headRow(allCols)}</thead><tbody>${rows}</tbody></table>`;
   m.appendChild(w);
+}
+
+/** The rows a report lists: the one chosen in Select, or those ticked on the
+    toolbar, or — when neither was used — all of them. */
+function repRows(dim, table) {
+  const chosen = selOf(dim);
+  if (rep.entity) return [byId(table, rep.entity)].filter(Boolean);
+  const list = rowsOf(table);
+  return chosen.length ? list.filter(r => chosen.includes(r.id)) : list;
 }
 
 function repEmployee(m) { perCurrency(m, repEmployeeOne); }
@@ -2921,13 +3091,13 @@ function employeeBuckets(l) {
 function repEmployeeOne(m) {
   const cols = reportCols("employee");
   const allCols = [...cols.lead, ...visibleBody("employee", cols.body)];
-  const list = rep.entity ? [byId("employees", rep.entity)].filter(Boolean) : rowsOf("employees");
+  const list = repRows("employee", "employees");
   const w = el("div", { class:"tablewrap" });
   if (!list.length) { w.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; m.appendChild(w); return; }
 
   const sums = { salary:0, paid:0, work:0, advances:0, drawings:0, total:0, rows:0 };
   const rows = list.map(e => {
-    const l = txs({ employeeId:e.id, from:rep.from, to:rep.to }).filter(paidToEmployee);
+    const l = txs({ employeeId:e.id, from:rep.from, to:rep.to }).filter(paidToEmployee).filter(selOk);
     const b = employeeBuckets(l);
     sums.salary += num(e.salary); sums.paid += b.sal; sums.work += b.work;
     sums.advances += b.adv; sums.drawings += b.draw; sums.total += b.total; sums.rows += l.length;
@@ -2948,7 +3118,7 @@ function repEmployeeOne(m) {
   /* One employee chosen: what they cost, project by project, then every entry. */
   if (rep.entity && list[0]) {
     const e = list[0];
-    const mine = txs({ employeeId:e.id, from:rep.from, to:rep.to }).filter(paidToEmployee);
+    const mine = txs({ employeeId:e.id, from:rep.from, to:rep.to }).filter(paidToEmployee).filter(selOk);
     const byProject = {};
     mine.forEach(x => {
       const k = x.projectId || "";
@@ -3003,9 +3173,12 @@ function repEmployeeOne(m) {
 function repBank(m) {
   const cols = reportCols("bank");
   const allCols = [...cols.lead, ...visibleBody("bank", cols.body), ...cols.tail];
-  const list = rep.entity ? [byId("accounts", rep.entity)].filter(Boolean) : curAccounts();
+  const chosenAcc = selOf("account");
+  const list = rep.entity ? [byId("accounts", rep.entity)].filter(Boolean)
+             : chosenAcc.length ? curAccounts().filter(a => chosenAcc.includes(a.id))
+             : curAccounts();
   list.forEach(a => {
-    const all = txs({ accountId:a.id });
+    const all = txs({ accountId:a.id }).filter(selOk);
     const before = all.filter(x => rep.from && x.date < rep.from);
     const opening = num(a.opening) + sum(before.filter(isCashIn), amountOf) - sum(before.filter(isCashOut), amountOf);
     const period = all.filter(x => inRange(x, rep.from, rep.to)).filter(x => isCashIn(x) || isCashOut(x));
