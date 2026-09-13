@@ -26,6 +26,9 @@ const setup = pg => pg.evaluate(() => {
   DB.transactions.push(row({ date:'2026-03-05', type:'EXPENSE', employeeId:'EMP-1', debit:150, projectId:'PRJ-A' }));
   DB.transactions.push(row({ date:'2026-03-09', type:'EXPENSE', employeeId:'EMP-1', debit:250, projectId:'PRJ-B' }));
   DB.transactions.push(row({ date:'2026-03-11', type:'ADVANCE TO EMPLOYEE', employeeId:'EMP-1', debit:90, projectId:'PRJ-B' }));
+  // Mansour again: a bus fare and a hotel night he paid for and is owed back
+  DB.transactions.push(row({ date:'2026-03-06', type:'EXPENSE CLAIM', employeeId:'EMP-1', debit:30, projectId:'PRJ-A', notes:'bus to site' }));
+  DB.transactions.push(row({ date:'2026-03-07', type:'EXPENSE CLAIM', employeeId:'EMP-1', debit:120, projectId:'PRJ-B', notes:'hotel' }));
   // Yasmeen: one expense with no project at all
   DB.transactions.push(row({ date:'2026-03-12', type:'EXPENSE', employeeId:'EMP-2', debit:70 }));
   // an invoice that names Mansour but is money coming IN — must not count as paid to him
@@ -53,15 +56,23 @@ async function run(ctx) {
   const m = await figures(pg, 'EMP-1');
   check('a job expense naming the employee is counted, not ignored', m.work === 400,
         `work & expenses = ${m.work}, expected 150 + 250`);
+
+  /* ---- money they laid out and are owed back ---- */
+  check('what they were reimbursed is its own figure', m.claim === 150,
+        `expense claims = ${m.claim}, expected 30 + 120`);
+  check('a reimbursement is not counted as pay for the work',
+        m.work === 400, `work & expenses = ${m.work}`);
+  check('but it is still money the company paid out',
+        m.total === 400 + 150 + 250 + 90 + 30 + 120, `total ${m.total}`);
   check('the salary is still counted separately', m.sal === 400, `salary ${m.sal}`);
   check('the advance is counted and kept in its own column', m.adv === 90, `advance ${m.adv}`);
-  check('total paid is everything that left the account for this person',
-        m.total === 400 + 150 + 250 + 90, `total ${m.total}`);
+  check('the salary and advance are untouched by the new group',
+        m.sal === 400 && m.adv === 90, JSON.stringify({ sal:m.sal, adv:m.adv }));
   check('money coming IN is never counted as paid to them',
-        m.rows === 4, `${m.rows} rows counted, expected 4`);
+        m.rows === 6, `${m.rows} rows counted, expected 6`);
 
   check('the spend splits by the project it was for',
-        m.byProject['Go Green-14'] === 550 && m.byProject['UNHCR-GEN-001'] === 340,
+        m.byProject['Go Green-14'] === 580 && m.byProject['UNHCR-GEN-001'] === 460,
         JSON.stringify(m.byProject));
 
   const y = await figures(pg, 'EMP-2');
@@ -78,7 +89,7 @@ async function run(ctx) {
     return cells.filter(r => r[0] === 'Mansour')[0] || [];
   });
   check('the report on screen shows the money, not zero',
-        shown.join(' ').includes('890.00'), shown.join(' | '));
+        shown.join(' ').includes('1,040.00'), shown.join(' | '));
 
   // drill into one employee
   await pg.selectOption('#r_ent', 'EMP-1');

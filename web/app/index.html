@@ -346,6 +346,12 @@ const TXTYPES = [
   { v:"EXPENSE",        ar:"مصروف",             phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cost_cash_out", cash:true },
   { v:"SALARY",         ar:"راتب",              phase:"OTHER",          party:"employee", fin:true, side:"debit",  flow:"cost_cash_out", cash:true },
   { v:"ADVANCE TO EMPLOYEE", ar:"سلفة موظف",    phase:"OTHER",          party:"employee", fin:true, side:"debit",  flow:"cash_out", cash:true },
+  /* Money the company owes a person back because they spent it on our behalf —
+     a bus fare, a night in a hotel, fuel to reach a site. It is a cost of the
+     job like any other, which is why it posts the same way an expense does; it
+     is its own type so that "what did this person cost us" and "what did we
+     reimburse them" stay separate questions with separate answers. */
+  { v:"EXPENSE CLAIM",  ar:"مطالبة مصروفات",     phase:"OTHER",          party:"employee", fin:true, side:"debit",  flow:"cost_cash_out", cash:true },
   { v:"LOAN IN",        ar:"قرض/دين وارد",      phase:"OTHER",          party:"none",     fin:true, side:"credit", flow:"cash_in",  cash:true },
   { v:"LOAN OUT",       ar:"قرض/دين صادر",      phase:"OTHER",          party:"none",     fin:true, side:"debit",  flow:"cash_out", cash:true },
   { v:"TRANSFER IN",    ar:"تحويل وارد",        phase:"OTHER",          party:"none",     fin:true, side:"credit", flow:"cash_in",  cash:true },
@@ -1946,6 +1952,7 @@ function employeeCols() {
       { id:"salary",   label:"Monthly salary",  num:true,  default:true },
       { id:"paid",     label:"Salaries paid",   num:true,  default:true },
       { id:"work",     label:"Work & expenses", num:true,  default:true },
+      { id:"claims",   label:"Expense claims",  num:true,  default:true },
       { id:"advances", label:"Advances (owed back)", num:true, default:true },
       { id:"drawings", label:"Owner drawings",  num:true,  default:false },
       { id:"total",    label:"Total paid",      num:true,  default:true },
@@ -3078,14 +3085,16 @@ function repEmployee(m) { perCurrency(m, repEmployeeOne); }
    the account, so they are in "total paid" and marked as owed back. */
 const paidToEmployee = x => isCashOut(x) && !!x.employeeId;
 
+const EMP_BUCKET_TYPES = ["SALARY", "ADVANCE TO EMPLOYEE", "OWNER DRAWINGS", "EXPENSE CLAIM"];
 function employeeBuckets(l) {
   const of = p => sum(l.filter(p), amountOf);
-  const sal  = of(x => x.type === "SALARY");
-  const adv  = of(x => x.type === "ADVANCE TO EMPLOYEE");
-  const draw = of(x => x.type === "OWNER DRAWINGS");
-  const work = of(x => paidToEmployee(x) && !["SALARY","ADVANCE TO EMPLOYEE","OWNER DRAWINGS"]
-                        .includes(x.type));
-  return { sal, adv, draw, work, total: of(paidToEmployee) };
+  const sal   = of(x => x.type === "SALARY");
+  const adv   = of(x => x.type === "ADVANCE TO EMPLOYEE");
+  const draw  = of(x => x.type === "OWNER DRAWINGS");
+  const claim = of(x => x.type === "EXPENSE CLAIM");
+  // Whatever is left is money paid to the person for the work itself.
+  const work  = of(x => paidToEmployee(x) && !EMP_BUCKET_TYPES.includes(x.type));
+  return { sal, adv, draw, claim, work, total: of(paidToEmployee) };
 }
 
 function repEmployeeOne(m) {
@@ -3095,22 +3104,23 @@ function repEmployeeOne(m) {
   const w = el("div", { class:"tablewrap" });
   if (!list.length) { w.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; m.appendChild(w); return; }
 
-  const sums = { salary:0, paid:0, work:0, advances:0, drawings:0, total:0, rows:0 };
+  const sums = { salary:0, paid:0, work:0, claims:0, advances:0, drawings:0, total:0, rows:0 };
   const rows = list.map(e => {
     const l = txs({ employeeId:e.id, from:rep.from, to:rep.to }).filter(paidToEmployee).filter(selOk);
     const b = employeeBuckets(l);
     sums.salary += num(e.salary); sums.paid += b.sal; sums.work += b.work;
-    sums.advances += b.adv; sums.drawings += b.draw; sums.total += b.total; sums.rows += l.length;
+    sums.claims += b.claim; sums.advances += b.adv; sums.drawings += b.draw;
+    sums.total += b.total; sums.rows += l.length;
     const data = { name: esc(e.nameEn), position: esc(e.position || ""), phone: esc(e.phone || ""),
-      salary: fmt(e.salary), paid: fmt(b.sal), work: fmt(b.work), advances: fmt(b.adv),
-      drawings: fmt(b.draw), total: fmt(b.total), rows: String(l.length),
+      salary: fmt(e.salary), paid: fmt(b.sal), work: fmt(b.work), claims: fmt(b.claim),
+      advances: fmt(b.adv), drawings: fmt(b.draw), total: fmt(b.total), rows: String(l.length),
       projects: String(new Set(l.map(x => x.projectId).filter(Boolean)).size),
       net: fmt(b.sal - b.adv) };
     return dataRow(allCols, data);
   }).join("");
-  const foot = { salary:sums.salary, paid:sums.paid, work:sums.work, advances:sums.advances,
-                 drawings:sums.drawings, total:sums.total, rows:sums.rows,
-                 net:sums.paid - sums.advances };
+  const foot = { salary:sums.salary, paid:sums.paid, work:sums.work, claims:sums.claims,
+                 advances:sums.advances, drawings:sums.drawings, total:sums.total,
+                 rows:sums.rows, net:sums.paid - sums.advances };
   w.innerHTML = `<table><thead>${headRow(allCols)}</thead><tbody>${rows}</tbody>
     <tfoot>${footRow(allCols, cols.lead.length, foot)}</tfoot></table>`;
   m.appendChild(w);
@@ -3130,23 +3140,23 @@ function repEmployeeOne(m) {
     const c1 = el("div", { class:"card" });
     c1.appendChild(el("h2", {}, `${esc(e.nameEn)} — paid by project`));
     const t1 = el("div", { class:"tablewrap" });
+    const all = employeeBuckets(mine);
     t1.innerHTML = `<table><thead><tr><th>Project</th><th class="num">Salary</th>
-      <th class="num">Work & expenses</th><th class="num">Advances</th>
-      <th class="num">Drawings</th><th class="num">Total paid</th>
-      <th class="num">Entries</th></tr></thead><tbody>${
+      <th class="num">Work & expenses</th><th class="num">Expense claims</th>
+      <th class="num">Advances</th><th class="num">Drawings</th>
+      <th class="num">Total paid</th><th class="num">Entries</th></tr></thead><tbody>${
       order.map(k => {
         const b = employeeBuckets(byProject[k]);
         return `<tr><td>${esc(nameOf("projects", k) || "— no project —")}</td>
           <td class="num">${fmt(b.sal)}</td><td class="num">${fmt(b.work)}</td>
-          <td class="num">${fmt(b.adv)}</td><td class="num">${fmt(b.draw)}</td>
+          <td class="num">${fmt(b.claim)}</td><td class="num">${fmt(b.adv)}</td>
+          <td class="num">${fmt(b.draw)}</td>
           <td class="num">${fmt(b.total)}</td><td class="num">${byProject[k].length}</td></tr>`;
-      }).join("") || `<tr><td colspan="7" class="empty">${esc(t("none"))}</td></tr>`}</tbody>
+      }).join("") || `<tr><td colspan="8" class="empty">${esc(t("none"))}</td></tr>`}</tbody>
       <tfoot><tr><td>${esc(t("total"))}</td>
-        <td class="num">${fmt(employeeBuckets(mine).sal)}</td>
-        <td class="num">${fmt(employeeBuckets(mine).work)}</td>
-        <td class="num">${fmt(employeeBuckets(mine).adv)}</td>
-        <td class="num">${fmt(employeeBuckets(mine).draw)}</td>
-        <td class="num">${fmt(employeeBuckets(mine).total)}</td>
+        <td class="num">${fmt(all.sal)}</td><td class="num">${fmt(all.work)}</td>
+        <td class="num">${fmt(all.claim)}</td><td class="num">${fmt(all.adv)}</td>
+        <td class="num">${fmt(all.draw)}</td><td class="num">${fmt(all.total)}</td>
         <td class="num">${mine.length}</td></tr></tfoot></table>`;
     c1.appendChild(t1);
     m.appendChild(c1);
