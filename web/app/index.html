@@ -1574,6 +1574,43 @@ const assetOfTx = tx => rowsOf("assets").find(a => a.sourceTx === tx.id) || null
 
 let ledgerFilter = { from:"", to:"", type:"", status:"", q:"" };
 
+/* ---------- searching the ledger ----------
+   The search box read five fields. Looking for a person, an amount, a project
+   or an account found nothing, which reads as "we have no such entry" rather
+   than "this box does not look there" — the worst way for a search to fail.
+
+   Every transaction is now flattened into one line holding everything about
+   it: its own number and the workbook's, the date, the type, the status, the
+   currency, every reference, the notes, and — resolved to their names, not
+   their codes — the customer, supplier, employee, project, account, category
+   and item. Money is indexed twice, as typed and as shown, so both 125000 and
+   125,000.00 find the same row.
+
+   Several words narrow rather than widen: "yasmeen transport" finds the rows
+   that mention both, which is how people actually search. */
+function txHaystack(x) {
+  const names = [nameOf("customers", x.customerId), nameOf("suppliers", x.supplierId),
+                 nameOf("employees", x.employeeId), nameOf("projects", x.projectId),
+                 nameOf("accounts", x.accountId),  nameOf("categories", x.categoryId),
+                 nameOf("items", x.itemId)];
+  const money = [x.debit, x.credit, x.qty, x.unitPrice, x.discount, x.fxRate]
+    .filter(v => num(v))
+    .reduce((acc, v) => acc.concat([String(num(v)), fmt(v)]), []);
+  return [x.id, x.sourceRef, x.date, x.type, x.phase, x.status, x.currency, x.isAsset,
+          x.caseNo, x.refNo, x.againstRef, x.docType, x.docRef, x.notes, x.createdBy,
+          x.customerId, x.supplierId, x.employeeId, x.projectId, x.accountId,
+          x.categoryId, x.itemId]
+    .concat(names).concat(money)
+    .filter(Boolean).join(" ").toLowerCase();
+}
+
+/** Rows matching every word typed. */
+function ledgerSearch(list, q) {
+  const terms = String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return list;
+  return list.filter(x => { const hay = txHaystack(x); return terms.every(w => hay.includes(w)); });
+}
+
 function viewLedger(m) {
   pageHead(m, t("ledger"), "Daily_Transactions — the single source of truth", [
     { label:t("print"), on:() => doPrint("Transactions") },
@@ -1589,22 +1626,31 @@ function viewLedger(m) {
     TXTYPES.map(x => `<option ${x.v === ledgerFilter.type ? "selected" : ""}>${esc(x.v)}</option>`).join("")}</select>`));
   bar.appendChild(fld("Status | الحالة", `<select id="f_status"><option value=""></option>${
     STATUSES.map(s => `<option ${s === ledgerFilter.status ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`));
-  bar.appendChild(fld("Search | بحث", `<input id="f_q" value="${esc(ledgerFilter.q)}" placeholder="reference, case, note">`));
+  bar.appendChild(fld("Search | بحث", `<input id="f_q" value="${esc(ledgerFilter.q)}"
+    placeholder="anything — name, amount, project, account, type, note…" style="min-width:16rem">`));
   const apply = el("button", { class:"btn sm" }, "Apply");
-  apply.onclick = () => {
+  const runFilter = () => {
     ledgerFilter = { from:$("#f_from").value, to:$("#f_to").value, type:$("#f_type").value,
                      status:$("#f_status").value, q:$("#f_q").value.trim().toLowerCase() };
     render();
   };
+  apply.onclick = runFilter;
   bar.appendChild(apply);
   m.appendChild(bar);
-
-  let list = txs({ from:ledgerFilter.from, to:ledgerFilter.to, type:ledgerFilter.type, status:ledgerFilter.status });
-  if (ledgerFilter.q) {
-    const q = ledgerFilter.q;
-    list = list.filter(x => [x.refNo, x.caseNo, x.notes, x.docRef, x.id]
-      .some(v => String(v || "").toLowerCase().includes(q)));
+  // Typing a search and pressing Enter is the obvious gesture; make it work.
+  const box = $("#f_q");
+  if (box) {
+    box.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); runFilter(); } };
+    if (ledgerFilter.q) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
   }
+
+  const before = txs({ from:ledgerFilter.from, to:ledgerFilter.to,
+                       type:ledgerFilter.type, status:ledgerFilter.status });
+  const list = ledgerSearch(before, ledgerFilter.q);
+  if (ledgerFilter.q)
+    m.appendChild(el("div", { class:"card-note", style:"margin:-.4rem 0 .6rem" },
+      `${list.length} of ${before.length} ${before.length === 1 ? "entry" : "entries"} match “${
+        esc(ledgerFilter.q)}”`));
   m.appendChild(txTable(list));
 }
 
