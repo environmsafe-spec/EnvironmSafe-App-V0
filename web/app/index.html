@@ -1897,11 +1897,17 @@ function employeeCols() {
   return {
     lead: [ { id:"name", label:"Employee", num:false } ],
     body: [
-      { id:"position", label:"Position",       num:false, default:true },
-      { id:"salary",   label:"Monthly salary", num:true,  default:true },
-      { id:"paid",     label:"Salaries paid",  num:true,  default:true },
-      { id:"advances", label:"Advances",       num:true,  default:true },
-      { id:"net",      label:"Net",            num:true,  default:true },
+      { id:"position", label:"Position",        num:false, default:true },
+      { id:"salary",   label:"Monthly salary",  num:true,  default:true },
+      { id:"paid",     label:"Salaries paid",   num:true,  default:true },
+      { id:"work",     label:"Work & expenses", num:true,  default:true },
+      { id:"advances", label:"Advances (owed back)", num:true, default:true },
+      { id:"drawings", label:"Owner drawings",  num:true,  default:false },
+      { id:"total",    label:"Total paid",      num:true,  default:true },
+      { id:"rows",     label:"Entries",         num:true,  default:false },
+      { id:"projects", label:"Projects",        num:true,  default:false },
+      { id:"phone",    label:"Phone",           num:false, default:false },
+      { id:"net",      label:"Salaries − advances", num:true, default:false },
     ],
     tail: [],
   };
@@ -2887,22 +2893,111 @@ function repProjectOne(m) {
 }
 
 function repEmployee(m) { perCurrency(m, repEmployeeOne); }
+
+/* What the company paid a person, and for which job.
+
+   Money reaches an employee under several headings: a salary, an advance they
+   owe back, and — by far the most of it here — expenses paid to them or on
+   their behalf for work on a project. Counting only the first two answered
+   "what salary did we pay" while the real spend on that person stayed
+   invisible, which is how this report came to read zero.
+
+   So every row that moved money out and names the employee is counted, grouped
+   the way the money was meant: salary, work and expenses, advances, drawings.
+   Advances are shown but kept out of the total in spirit only — they did leave
+   the account, so they are in "total paid" and marked as owed back. */
+const paidToEmployee = x => isCashOut(x) && !!x.employeeId;
+
+function employeeBuckets(l) {
+  const of = p => sum(l.filter(p), amountOf);
+  const sal  = of(x => x.type === "SALARY");
+  const adv  = of(x => x.type === "ADVANCE TO EMPLOYEE");
+  const draw = of(x => x.type === "OWNER DRAWINGS");
+  const work = of(x => paidToEmployee(x) && !["SALARY","ADVANCE TO EMPLOYEE","OWNER DRAWINGS"]
+                        .includes(x.type));
+  return { sal, adv, draw, work, total: of(paidToEmployee) };
+}
+
 function repEmployeeOne(m) {
   const cols = reportCols("employee");
   const allCols = [...cols.lead, ...visibleBody("employee", cols.body)];
   const list = rep.entity ? [byId("employees", rep.entity)].filter(Boolean) : rowsOf("employees");
   const w = el("div", { class:"tablewrap" });
   if (!list.length) { w.innerHTML = `<div class="empty">${esc(t("none"))}</div>`; m.appendChild(w); return; }
+
+  const sums = { salary:0, paid:0, work:0, advances:0, drawings:0, total:0, rows:0 };
   const rows = list.map(e => {
-    const l = txs({ employeeId:e.id, from:rep.from, to:rep.to });
-    const sal = sum(l.filter(x => x.type === "SALARY"), amountOf);
-    const adv = sum(l.filter(x => x.type === "ADVANCE TO EMPLOYEE"), amountOf);
-    const data = { name: esc(e.nameEn), position: esc(e.position || ""), salary: fmt(e.salary),
-      paid: fmt(sal), advances: fmt(adv), net: fmt(sal - adv) };
+    const l = txs({ employeeId:e.id, from:rep.from, to:rep.to }).filter(paidToEmployee);
+    const b = employeeBuckets(l);
+    sums.salary += num(e.salary); sums.paid += b.sal; sums.work += b.work;
+    sums.advances += b.adv; sums.drawings += b.draw; sums.total += b.total; sums.rows += l.length;
+    const data = { name: esc(e.nameEn), position: esc(e.position || ""), phone: esc(e.phone || ""),
+      salary: fmt(e.salary), paid: fmt(b.sal), work: fmt(b.work), advances: fmt(b.adv),
+      drawings: fmt(b.draw), total: fmt(b.total), rows: String(l.length),
+      projects: String(new Set(l.map(x => x.projectId).filter(Boolean)).size),
+      net: fmt(b.sal - b.adv) };
     return dataRow(allCols, data);
   }).join("");
-  w.innerHTML = `<table><thead>${headRow(allCols)}</thead><tbody>${rows}</tbody></table>`;
+  const foot = { salary:sums.salary, paid:sums.paid, work:sums.work, advances:sums.advances,
+                 drawings:sums.drawings, total:sums.total, rows:sums.rows,
+                 net:sums.paid - sums.advances };
+  w.innerHTML = `<table><thead>${headRow(allCols)}</thead><tbody>${rows}</tbody>
+    <tfoot>${footRow(allCols, cols.lead.length, foot)}</tfoot></table>`;
   m.appendChild(w);
+
+  /* One employee chosen: what they cost, project by project, then every entry. */
+  if (rep.entity && list[0]) {
+    const e = list[0];
+    const mine = txs({ employeeId:e.id, from:rep.from, to:rep.to }).filter(paidToEmployee);
+    const byProject = {};
+    mine.forEach(x => {
+      const k = x.projectId || "";
+      (byProject[k] = byProject[k] || []).push(x);
+    });
+    const order = Object.keys(byProject).sort((a, b) =>
+      sum(byProject[b], amountOf) - sum(byProject[a], amountOf));
+
+    const c1 = el("div", { class:"card" });
+    c1.appendChild(el("h2", {}, `${esc(e.nameEn)} — paid by project`));
+    const t1 = el("div", { class:"tablewrap" });
+    t1.innerHTML = `<table><thead><tr><th>Project</th><th class="num">Salary</th>
+      <th class="num">Work & expenses</th><th class="num">Advances</th>
+      <th class="num">Drawings</th><th class="num">Total paid</th>
+      <th class="num">Entries</th></tr></thead><tbody>${
+      order.map(k => {
+        const b = employeeBuckets(byProject[k]);
+        return `<tr><td>${esc(nameOf("projects", k) || "— no project —")}</td>
+          <td class="num">${fmt(b.sal)}</td><td class="num">${fmt(b.work)}</td>
+          <td class="num">${fmt(b.adv)}</td><td class="num">${fmt(b.draw)}</td>
+          <td class="num">${fmt(b.total)}</td><td class="num">${byProject[k].length}</td></tr>`;
+      }).join("") || `<tr><td colspan="7" class="empty">${esc(t("none"))}</td></tr>`}</tbody>
+      <tfoot><tr><td>${esc(t("total"))}</td>
+        <td class="num">${fmt(employeeBuckets(mine).sal)}</td>
+        <td class="num">${fmt(employeeBuckets(mine).work)}</td>
+        <td class="num">${fmt(employeeBuckets(mine).adv)}</td>
+        <td class="num">${fmt(employeeBuckets(mine).draw)}</td>
+        <td class="num">${fmt(employeeBuckets(mine).total)}</td>
+        <td class="num">${mine.length}</td></tr></tfoot></table>`;
+    c1.appendChild(t1);
+    m.appendChild(c1);
+
+    const c2 = el("div", { class:"card" });
+    c2.appendChild(el("h2", {}, `${esc(e.nameEn)} — every payment`));
+    const t2 = el("div", { class:"tablewrap" });
+    let run = 0;
+    t2.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
+      <th>Project</th><th>Account</th><th>${esc(t("ref"))}</th><th>${esc(t("notes"))}</th>
+      <th class="num">${esc(t("amount"))}</th><th class="num">Running</th></tr></thead><tbody>${
+      mine.map(x => { run += amountOf(x);
+        return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}</td>
+          <td>${esc(nameOf("projects", x.projectId))}</td>
+          <td>${esc(nameOf("accounts", x.accountId))}</td>
+          <td>${esc(x.refNo || "")}</td><td>${esc((x.notes || "").slice(0, 60))}</td>
+          <td class="num">${fmt(amountOf(x))}</td><td class="num">${fmt(run)}</td></tr>`;
+      }).join("") || `<tr><td colspan="8" class="empty">${esc(t("none"))}</td></tr>`}</tbody></table>`;
+    c2.appendChild(t2);
+    m.appendChild(c2);
+  }
 }
 
 function repBank(m) {

@@ -102,7 +102,7 @@ module.exports = { name: 'columns', run: async (ctx) => {
       kind:'Cash', opening:0, currency:'YER' });
     save();
   });
-  for (const [route, mustHave] of [['r_bank','In'], ['r_project','Revenue'], ['r_employee','Net']]) {
+  for (const [route, mustHave] of [['r_bank','In'], ['r_project','Revenue'], ['r_employee','Total paid']]) {
     await pg.goto(ctx.appUrl + '#/' + route); await pg.waitForTimeout(900);
     const has = await pg.locator('.page-head button:has-text("Columns")').count() === 1;
     ctx.check(`${route}: the Columns button is offered`, has);
