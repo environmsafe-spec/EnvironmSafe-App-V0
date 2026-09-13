@@ -531,7 +531,15 @@ function seed(d) {
     { nameEn:"Staff motivation", nameAr:"حوافز", kind:"Salaries" },
     { nameEn:"Shipping & clearance", nameAr:"شحن وتخليص", kind:"Logistics" },
     { nameEn:"Government fees", nameAr:"رسوم حكومية", kind:"Government" },
-    { nameEn:"Bank charges", nameAr:"عمولات بنكية", kind:"Finance" }
+    { nameEn:"Bank charges", nameAr:"عمولات بنكية", kind:"Finance" },
+    /* These five name the same things the transaction types do, so the category
+       chosen and the type chosen say the same thing about a row. The reports
+       still count by type — a category is a label, not a posting rule. */
+    { nameEn:"OWNER DRAWINGS", nameAr:"مسحوبات الملاك", kind:"Other" },
+    { nameEn:"Work & expenses", nameAr:"أعمال ومصروفات", kind:"Operations" },
+    { nameEn:"Expense claims", nameAr:"مطالبات مصروفات", kind:"Operations" },
+    { nameEn:"Debit (owed back)", nameAr:"مدين - مستحق الاسترداد", kind:"Other" },
+    { nameEn:"Guarantee", nameAr:"ضمان", kind:"Finance" }
   ]);
 }
 /* Record identity.

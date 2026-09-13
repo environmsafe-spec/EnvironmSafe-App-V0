@@ -68,5 +68,12 @@ module.exports = { name: 'app', run: async (ctx) => {
   ctx.check('every sidebar entry is a real link', nav.n > 0 && nav.all, `${nav.n} screens`);
 
   ctx.check('no uncaught errors', pg.errors.length === 0, pg.errors.slice(0, 2).join(' | '));
+  // The five headings the office uses for money paid to people must be offered
+  // on a fresh device, not only on the one they were typed into.
+  const cats = await pg.evaluate(() => rowsOf('categories').map(c => c.nameEn));
+  ['OWNER DRAWINGS','Work & expenses','Expense claims','Debit (owed back)','Guarantee']
+    .forEach(want => ctx.check(`the expense categories offer “${want}”`,
+      cats.includes(want), cats.join(', ')));
+
   await pg.ctx.close();
 }};
