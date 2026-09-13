@@ -511,10 +511,15 @@ function save() {
   catch (e) { toast("Storage is full — export a backup and remove old attachments."); }
   scheduleSync();
 }
+/* The starter rows every empty device begins with are marked, because a device
+   that turns out to be joining a company that already keeps books must give
+   them up rather than push them: they would otherwise arrive as ACC-0001 and
+   CAT-0001 — the very numbers the company's real accounts already answer to. */
 function seed(d) {
   const now = new Date().toISOString();
   const mk = (tbl, prefix, rows) => rows.forEach((r,i) => {
-    d[tbl].push(Object.assign({ id:`${prefix}-${String(i+1).padStart(4,"0")}`, createdAt:now, updatedAt:now }, r));
+    d[tbl].push(Object.assign({ id:`${prefix}-${String(i+1).padStart(4,"0")}`, createdAt:now, updatedAt:now,
+                                starter:true }, r));
     d.meta.seq[prefix] = i+1;
   });
   mk("accounts","ACC",[
@@ -1437,7 +1442,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.9.0";
+const APP_VERSION = "1.9.1";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -3643,11 +3648,30 @@ async function syncPush() {
   return changes.length;
 }
 
+/* How many records one answer may carry. The server caps a single response at
+   its own maximum however large a limit is asked for, and nothing in the reply
+   admits that anything was held back. Reading one answer and stopping would not
+   merely be slow: records written in the same instant share an updated_at, the
+   cap can fall in the middle of such a group, and the next pull asks for rows
+   *after* that instant — so the rest of that group would never be asked for
+   again. Pages are read to the end, and the mark moves only once they are. */
+const PULL_PAGE = 500;
+
 async function syncPull() {
   const since = SYNC.lastPull || "1970-01-01T00:00:00Z";
-  const rows = await cloudRest("/es_records?company_id=eq." + encodeURIComponent(SYNC.companyId)
-    + "&updated_at=gt." + encodeURIComponent(since)
-    + "&select=collection,record_id,data,deleted,updated_at&order=updated_at.asc&limit=5000");
+  const rows = [];
+  // A short answer does not mean the end: the server may cap a page far below
+  // what was asked for. Only an empty one does, so that is what is waited for.
+  for (let page = 0, offset = 0; page < 2000; page++) {
+    const batch = await cloudRest("/es_records?company_id=eq." + encodeURIComponent(SYNC.companyId)
+      + "&updated_at=gt." + encodeURIComponent(since)
+      + "&select=collection,record_id,data,deleted,updated_at"
+      + "&order=updated_at.asc,record_id.asc"
+      + "&offset=" + offset + "&limit=" + PULL_PAGE) || [];
+    if (!batch.length) break;
+    batch.forEach(r => rows.push(r));
+    offset += batch.length;
+  }
   let applied = 0, newest = SYNC.lastPull || "";
   (rows || []).forEach(row => {
     if (!row.updated_at) return;
@@ -3678,6 +3702,25 @@ async function syncPull() {
   return applied;
 }
 
+/* A device joining a company that already keeps books has nothing of its own
+   worth offering — only the starter accounts and categories it was born with.
+   Those are dropped here rather than sent, so the company's real ACC-0001 and
+   CAT-0001 stay the only records answering to those numbers. A device opening a
+   company that is genuinely empty keeps its starter rows and sends them up. */
+function adoptCompanyBooks() {
+  let dropped = 0;
+  ["accounts", "categories"].forEach(tbl => {
+    const list = DB[tbl] || [];
+    if (!list.some(r => r && !r.starter)) {          // nothing came down: ours stand
+      list.forEach(r => { if (r) delete r.starter; });
+      return;
+    }
+    for (let i = list.length - 1; i >= 0; i--)
+      if (list[i] && list[i].starter) { list.splice(i, 1); dropped++; }
+  });
+  return dropped;
+}
+
 /** Push then pull. Never throws at the caller; reports in plain words. */
 async function syncNow(quiet) {
   if (!cloudSignedIn()) { if (!quiet) toast("Sign in to the cloud account first."); return null; }
@@ -3685,8 +3728,18 @@ async function syncNow(quiet) {
   SYNC_RUNNING = true;
   try {
     if (!SYNC.companyId) await syncCompany();
-    const pushed = await syncPush();
-    const pulled = await syncPull();
+    // On the very first exchange the company's books are read before anything
+    // is offered, so this device can stand down in their favour.
+    const joining = !SYNC.lastPull;
+    let pushed = 0, pulled = 0;
+    if (joining) {
+      pulled = await syncPull();
+      if (adoptCompanyBooks()) save();
+      pushed = await syncPush();
+    } else {
+      pushed = await syncPush();
+      pulled = await syncPull();
+    }
     SYNC.lastAt = new Date().toISOString();
     syncSave();
     if (pulled) save();
