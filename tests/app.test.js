@@ -75,5 +75,21 @@ module.exports = { name: 'app', run: async (ctx) => {
     .forEach(want => ctx.check(`the expense categories offer “${want}”`,
       cats.includes(want), cats.join(', ')));
 
+  // Which build is running must be readable without asking anyone, because
+  // "it is not working" and "you are on an old copy" look identical otherwise.
+  await pg.goto(ctx.appUrl + '#/data'); await pg.waitForTimeout(700);
+  const stamp = await pg.evaluate(() => {
+    const rows = [...document.querySelectorAll('tbody tr')]
+      .map(r => [...r.children].map(td => td.textContent.trim()));
+    return { version: (rows.find(r => r[0] === 'App version') || [])[1] || '',
+             from: (rows.find(r => r[0] === 'Running from') || [])[1] || '',
+             tag: (document.getElementById('coTag') || {}).textContent || '' };
+  });
+  ctx.check('the app states which build it is', /^v\d+\.\d+\.\d+ · \d{4}-\d{2}-\d{2}$/.test(stamp.version),
+    stamp.version || '(not shown)');
+  ctx.check('and where it is running from', !!stamp.from, stamp.from || '(not shown)');
+  ctx.check('the build shows in the header too, before anyone signs in',
+    /v\d+\.\d+\.\d+/.test(stamp.tag), stamp.tag);
+
   await pg.ctx.close();
 }};

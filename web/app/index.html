@@ -1432,6 +1432,15 @@ function fld(label, inner) {
    the top. Choosing it opens the same form the Projects screen uses, and on save
    the new record drops into every list on the page and is selected here — the
    half-finished entry underneath is untouched. */
+/* Which build is this?
+   The app runs from three places — a browser tab, a phone's cached copy, and an
+   Android package with the whole thing frozen inside it — and they drift apart.
+   "It is not working" and "you are running February's copy" look identical
+   without this, so the build is stated where anyone can read it back. */
+const APP_VERSION = "1.9.0";
+const APP_BUILD   = "2026-09-13";
+const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
+
 const ADD_NEW = "__addnew__";
 const REF_NOUN = { customers:"customer", suppliers:"supplier", employees:"employee",
                    projects:"project", accounts:"bank or cash account",
@@ -4137,7 +4146,11 @@ function viewData(m) {
   const counts = ["users","items","assets","customers","suppliers","employees","projects","accounts","categories","transactions"]
     .map(k => `<tr><td>${esc(k)}</td><td class="num">${rowsOf(k).length}</td></tr>`).join("");
   c4.innerHTML = `<h2>This device</h2><div class="tablewrap"><table><tbody>${counts}
-    <tr><td>Device ID</td><td class="num">${esc(DB.meta.device || "")}</td></tr></tbody></table></div>`;
+    <tr><td>Device ID</td><td class="num">${esc(DB.meta.device || "")}</td></tr>
+    <tr><td><b>App version</b></td><td class="num"><b>${esc(buildStamp())}</b></td></tr>
+    <tr><td>Running from</td><td class="num">${
+      location.protocol === "file:" ? "the installed Android app" : esc(location.host || "this browser")
+    }</td></tr></tbody></table></div>`;
   const b4 = el("button", { class:"btn ghost sm", style:"margin-top:.7rem" }, "Erase everything on this device");
   b4.onclick = async () => {
     if (!isAdmin()) return toast("Only an Administrator can erase the device.");
@@ -4376,7 +4389,8 @@ function applyChrome() {
   document.documentElement.lang = LANG;
   document.documentElement.dir = LANG === "ar" ? "rtl" : "ltr";
   $("#coName").textContent = LANG === "ar" ? "إنفايرومسيف" : "EnvironmSafe";
-  $("#coTag").textContent = LANG === "ar" ? "المشتريات والمالية" : "Procurement & Finance";
+  $("#coTag").textContent = (LANG === "ar" ? "المشتريات والمالية" : "Procurement & Finance")
+    + " · " + buildStamp();
   const logo = CO().logo;
   const box = $("#logoBox");
   if (logo) {
