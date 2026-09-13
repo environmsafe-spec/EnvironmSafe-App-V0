@@ -1953,13 +1953,13 @@ function employeeCols() {
       { id:"paid",     label:"Salaries paid",   num:true,  default:true },
       { id:"work",     label:"Work & expenses", num:true,  default:true },
       { id:"claims",   label:"Expense claims",  num:true,  default:true },
-      { id:"advances", label:"Advances (owed back)", num:true, default:true },
+      { id:"advances", label:"Debit (owed back)", num:true, default:true },
       { id:"drawings", label:"Owner drawings",  num:true,  default:false },
       { id:"total",    label:"Total paid",      num:true,  default:true },
       { id:"rows",     label:"Entries",         num:true,  default:false },
       { id:"projects", label:"Projects",        num:true,  default:false },
       { id:"phone",    label:"Phone",           num:false, default:false },
-      { id:"net",      label:"Salaries − advances", num:true, default:false },
+      { id:"net",      label:"Salaries − debit", num:true, default:false },
     ],
     tail: [],
   };
@@ -3081,8 +3081,9 @@ function repEmployee(m) { perCurrency(m, repEmployeeOne); }
 
    So every row that moved money out and names the employee is counted, grouped
    the way the money was meant: salary, work and expenses, advances, drawings.
-   Advances are shown but kept out of the total in spirit only — they did leave
-   the account, so they are in "total paid" and marked as owed back. */
+   Money handed over that the company expects back is a debit against that
+   person — the word the office uses for it. It did leave the account, so it
+   counts in "total paid", and the heading says it is owed back. */
 const paidToEmployee = x => isCashOut(x) && !!x.employeeId;
 
 const EMP_BUCKET_TYPES = ["SALARY", "ADVANCE TO EMPLOYEE", "OWNER DRAWINGS", "EXPENSE CLAIM"];
@@ -3143,7 +3144,7 @@ function repEmployeeOne(m) {
     const all = employeeBuckets(mine);
     t1.innerHTML = `<table><thead><tr><th>Project</th><th class="num">Salary</th>
       <th class="num">Work & expenses</th><th class="num">Expense claims</th>
-      <th class="num">Advances</th><th class="num">Drawings</th>
+      <th class="num">Debit (owed back)</th><th class="num">Drawings</th>
       <th class="num">Total paid</th><th class="num">Entries</th></tr></thead><tbody>${
       order.map(k => {
         const b = employeeBuckets(byProject[k]);

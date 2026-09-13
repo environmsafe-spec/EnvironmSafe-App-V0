@@ -65,7 +65,17 @@ async function run(ctx) {
   check('but it is still money the company paid out',
         m.total === 400 + 150 + 250 + 90 + 30 + 120, `total ${m.total}`);
   check('the salary is still counted separately', m.sal === 400, `salary ${m.sal}`);
-  check('the advance is counted and kept in its own column', m.adv === 90, `advance ${m.adv}`);
+  check('the debit owed back is counted and kept in its own column', m.adv === 90, `debit ${m.adv}`);
+
+  // The office calls a recoverable payment a debit; the report must say so too,
+  // or the column and the conversation are about different things.
+  await pg.goto(ctx.appUrl + '#/r_employee'); await pg.waitForTimeout(800);
+  await pg.selectOption('#curSel', 'USD'); await pg.waitForTimeout(600);
+  const heads = await pg.evaluate(() =>
+    [...document.querySelectorAll('thead th')].map(h => h.textContent.trim()));
+  check('the column is headed Debit (owed back), not Advances',
+        heads.includes('Debit (owed back)') && !heads.some(h => /^Advances/.test(h)),
+        heads.join(' | '));
   check('the salary and advance are untouched by the new group',
         m.sal === 400 && m.adv === 90, JSON.stringify({ sal:m.sal, adv:m.adv }));
   check('money coming IN is never counted as paid to them',
