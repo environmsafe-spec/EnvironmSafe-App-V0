@@ -1202,9 +1202,7 @@ function viewDaily(m) {
   g.appendChild(fld("Expense category | البند", refSelect("categoryId","categories", d.categoryId)));
 
   g.appendChild(fld("Product / service | المنتج أو الخدمة",
-    `<select name="itemId"><option value=""></option>${rowsOf("items").map(it =>
-      `<option value="${esc(it.id)}">${esc(it.code ? it.code + " — " : "")}${esc(it.nameEn)}${
-        it.unit ? " (" + esc(it.unit) + ")" : ""}</option>`).join("")}</select>`));
+    refSelect("itemId", "items", d.itemId, "item")));
   g.appendChild(fld("Quantity | الكمية", `<input type="number" step="0.001" min="0" name="qty" placeholder="1">`));
   g.appendChild(fld("Unit price | سعر الوحدة", `<input type="number" step="0.01" min="0" name="unitPrice" placeholder="0.00">`));
   g.appendChild(fld("Line discount | خصم السطر", `<input type="number" step="0.01" min="0" name="discount" placeholder="0">`));
@@ -1291,6 +1289,7 @@ function viewDaily(m) {
     e.preventDefault();
     if (!canEdit()) return toast("Your role is read-only.");
     const f = Object.fromEntries(new FormData(form).entries());
+    Object.keys(f).forEach(k => { if (f[k] === ADD_NEW) f[k] = ""; });
     const ty = typeOf(f.type);
     const amount = num(f.amount);
     if (ty.fin && amount <= 0) return toast("Enter an amount greater than zero.");
@@ -1424,10 +1423,67 @@ function fld(label, inner) {
   f.innerHTML = `<label>${esc(en.trim())} ${ar ? `<span class="ar">${esc(ar.trim())}</span>` : ""}</label>${inner}`;
   return f;
 }
-function refSelect(name, tbl, val) {
-  return `<select name="${name}"><option value=""></option>${rowsOf(tbl).map(r =>
-    `<option value="${esc(r.id)}" ${r.id === val ? "selected" : ""}>${esc(r.nameEn)}</option>`).join("")}</select>`;
+/* ---------- adding what is missing, without losing your place ----------
+   Halfway through entering a payment you reach the project list and the project
+   is not in it. Leaving to create it loses everything typed so far, so the entry
+   gets filed against the wrong project, or against none.
+
+   Every list that points at a master record therefore offers "+ Add a new …" at
+   the top. Choosing it opens the same form the Projects screen uses, and on save
+   the new record drops into every list on the page and is selected here — the
+   half-finished entry underneath is untouched. */
+const ADD_NEW = "__addnew__";
+const REF_NOUN = { customers:"customer", suppliers:"supplier", employees:"employee",
+                   projects:"project", accounts:"bank or cash account",
+                   categories:"expense category", items:"product or service",
+                   assets:"asset", users:"user" };
+
+/* A couple of lists show more than a name. The style is named rather than passed
+   as a function, so a list can be rebuilt from its own markup after something is
+   added to it. */
+const REF_LABELS = {
+  item: it => `${it.code ? it.code + " — " : ""}${it.nameEn || ""}${it.unit ? " (" + it.unit + ")" : ""}`,
+};
+
+function refOptions(tbl, val, labelKey) {
+  const label = REF_LABELS[labelKey] || (r => r.nameEn || r.id);
+  return `<option value=""></option>` +
+    (canEdit() && SCHEMAS[tbl] && tbl !== "users"
+      ? `<option value="${ADD_NEW}">+ ${esc(t("add"))} ${esc(REF_NOUN[tbl] || "record")}…</option>` : "") +
+    rowsOf(tbl).map(r =>
+      `<option value="${esc(r.id)}" ${r.id === val ? "selected" : ""}>${esc(label(r))}</option>`).join("");
 }
+
+function refSelect(name, tbl, val, labelKey) {
+  return `<select name="${esc(name)}" data-reftable="${esc(tbl)}"${
+    labelKey ? ` data-reflabel="${esc(labelKey)}"` : ""}>${
+    refOptions(tbl, val, labelKey)}</select>`;
+}
+
+/** Put a freshly created record into every list on the page that shows its kind. */
+function refreshRefSelects(tbl, pick, only) {
+  document.querySelectorAll(`select[data-reftable="${tbl}"]`).forEach(sel => {
+    const keep = sel === only ? pick : (sel.value === ADD_NEW ? "" : sel.value);
+    sel.innerHTML = refOptions(tbl, keep, sel.dataset.reflabel);
+    sel.value = keep || "";
+    sel.dataset.prev = sel.value;
+  });
+}
+
+/* One listener for every such list, wherever it is drawn — the entry screen, the
+   edit box, or a master-data form that points at another master record. */
+document.addEventListener("change", e => {
+  const sel = e.target;
+  if (!sel || sel.tagName !== "SELECT" || !sel.dataset || !sel.dataset.reftable) return;
+  const tbl = sel.dataset.reftable;
+  if (sel.value !== ADD_NEW) { sel.dataset.prev = sel.value; return; }
+  // Never leave "+ Add a new…" standing as if it were a choice.
+  sel.value = sel.dataset.prev || "";
+  editMaster(tbl, null, rec => {
+    refreshRefSelects(tbl, rec.id, sel);
+    toast(`Added ${rec.nameEn || rec.id}`);
+  });
+});
 const caseNumbers = () => [...new Set(DB.transactions.map(x => x.caseNo).filter(Boolean))].sort();
 
 function txTable(list, opts = {}) {
@@ -1758,7 +1814,7 @@ function viewMaster(m, tbl) {
   m.appendChild(wrap);
 }
 
-function editMaster(tbl, id) {
+function editMaster(tbl, id, onDone) {
   if (!canEdit()) return toast("Your role is read-only.");
   if (tbl === "users" && !isAdmin()) return toast("Only an Administrator can manage users.");
   const S = SCHEMAS[tbl];
@@ -1777,6 +1833,7 @@ function editMaster(tbl, id) {
         return toast("You cannot remove your own Administrator role.");
     }
     const password = vals.password; delete vals.password;
+    let created = null;
     if (rec) { Object.assign(rec, vals, { updatedAt:now }); }
     else {
       const row = Object.assign({ id:nextId(S.prefix), createdAt:now, updatedAt:now }, vals);
@@ -1787,8 +1844,13 @@ function editMaster(tbl, id) {
         await setPassword(row, password);
       }
       DB[tbl].push(row);
+      created = row;
     }
-    save(); render(); toast("Saved");
+    save();
+    // Called from a list inside a half-finished form: redrawing the page here
+    // would throw that form away, which is the very thing this avoids.
+    if (onDone && created) return onDone(created);
+    render(); toast("Saved");
   });
 }
 
@@ -4293,6 +4355,9 @@ function modal(title, fields, onSave) {
   form.onsubmit = e => {
     e.preventDefault();
     const vals = Object.fromEntries(new FormData(form).entries());
+    // Belt and braces: the placeholder is reset the moment it is chosen, but it
+    // must never reach a record even if something slips past that.
+    Object.keys(vals).forEach(k => { if (vals[k] === ADD_NEW) vals[k] = ""; });
     bg.remove();
     onSave(vals);
   };
