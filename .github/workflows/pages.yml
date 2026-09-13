@@ -1,0 +1,47 @@
+name: Pages
+
+# A second home for the same web/ folder, served by GitHub Pages.
+#
+# Netlify remains the main address. This exists so the office is never stuck
+# on an old build when Netlify will not publish — a paused production deploy,
+# an outage, an expired account. Both hosts serve the very same files from
+# main, so whichever one answers is the current system.
+#
+# Turning it on, once: repository Settings -> Pages -> Build and deployment
+# -> Source: GitHub Actions. The address is then
+# https://environmsafe-spec.github.io/environmsafe-app-v0/app/
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two publishes race; the newest push is the one that should win.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish web/
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      # The system is a single file with no build step: the folder ships as is.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
