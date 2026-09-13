@@ -36,7 +36,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Turn Pages on for the repository if it is not on already, so the
+      # second address needs no visit to the settings page to exist.
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       # The system is a single file with no build step: the folder ships as is.
       - uses: actions/upload-pages-artifact@v3
