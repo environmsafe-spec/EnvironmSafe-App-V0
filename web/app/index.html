@@ -3507,6 +3507,20 @@ async function cloudSignUp(email, password) {
   return { signedIn:false };
 }
 
+/* Asks Supabase to email a recovery link. The link must come back to a page
+   that can actually take a new password, so the address of reset.html is sent
+   with the request — derived from this page so it is right on whichever
+   address the app is being used from. */
+async function cloudRecover(email) {
+  const here = location.href.split("#")[0].split("?")[0];
+  const back = here.replace(/[^/]*$/, "") + "reset.html";
+  await cloudFetch("/auth/v1/recover?redirect_to=" + encodeURIComponent(back), {
+    method: "POST",
+    body: JSON.stringify({ email: email })
+  });
+  return { sent: true };
+}
+
 /** A usable access token, refreshed near expiry. null when it cannot be had. */
 async function cloudToken() {
   if (!cloudSignedIn()) return null;
@@ -4017,7 +4031,22 @@ function cloudCard(m) {
     };
     bIn.onclick = () => run(cloudSignIn, "Signed in.");
     bUp.onclick = () => run(cloudSignUp, "Account created and signed in.");
-    bar.appendChild(bIn); bar.appendChild(bUp);
+
+    // Forgetting the password must not mean losing the books. This needs only
+    // the email, so it deliberately does not go through run().
+    const bFor = el("button", { class:"btn ghost" }, "Forgot password");
+    bFor.onclick = async () => {
+      const em = ($("#cl_email").value || "").trim();
+      if (!em) return toast("Enter the email first, then press this.");
+      bFor.disabled = true;
+      try {
+        await cloudRecover(em);
+        toast("If that email has an account, a link is on its way. Open it on this device.");
+      } catch (e) { toast(cloudMessage(e)); }
+      finally { bFor.disabled = false; }
+    };
+
+    bar.appendChild(bIn); bar.appendChild(bUp); bar.appendChild(bFor);
     box.appendChild(bar);
   };
   draw();
