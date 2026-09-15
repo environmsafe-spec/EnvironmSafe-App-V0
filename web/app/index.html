@@ -235,6 +235,11 @@
     .tablewrap { overflow:visible !important; }
     table { width:100% !important; font-size:9px; }
     th, td { white-space:normal !important; overflow-wrap:break-word; padding:.22rem .28rem; }
+    /* A heading is one long word — "Currency", "Reference" — and break-word
+       still reserves the whole word when the browser decides column widths, so
+       a single heading could push the last column off the page. Headings may
+       break anywhere; the figures below them still may not. */
+    th { overflow-wrap:anywhere; }
     /* Money must never be broken across lines, so figures stay on one line. */
     td.num, th.num { white-space:nowrap !important; }
     /* Sticky headings are a screen affordance and misplace themselves on paper. */
@@ -481,6 +486,7 @@ const T = {
   del:["Delete","حذف"], print:["Print / PDF","طباعة"], search:["Search","بحث"],
   from:["From","من"], to:["To","إلى"], total:["Total","الإجمالي"], balance:["Balance","الرصيد"],
   debit:["Debit","مدين"], credit:["Credit","دائن"], opening:["Opening","رصيد افتتاحي"],
+  currency:["Currency","العملة"],
   closing:["Closing","الرصيد الختامي"], date:["Date","التاريخ"], type:["Type","النوع"],
   phase:["Phase","المرحلة"], status:["Status","الحالة"], amount:["Amount","المبلغ"],
   ref:["Reference No","رقم المرجع"], notes:["Notes","ملاحظات"], none:["No records yet","لا توجد بيانات"]
@@ -1442,7 +1448,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.9.1";
+const APP_VERSION = "1.9.2";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -1509,6 +1515,7 @@ function txTable(list, opts = {}) {
     <td>${esc(nameOf("customers",tx.customerId) || nameOf("suppliers",tx.supplierId) || nameOf("employees",tx.employeeId) || "")}</td>
     <td>${esc(nameOf("projects",tx.projectId))}</td>
     <td>${esc(nameOf("accounts",tx.accountId))}</td>
+    <td>${esc(txCurrency(tx))}</td>
     <td class="num">${num(tx.debit) ? fmt(tx.debit) : ""}</td>
     <td class="num">${num(tx.credit) ? fmt(tx.credit) : ""}</td>
     <td><span class="pill ${esc((tx.status||"draft").toLowerCase())}">${esc(tx.status)}</span></td>
@@ -1518,15 +1525,24 @@ function txTable(list, opts = {}) {
       <button class="linkbtn" data-act="edit" data-id="${esc(tx.id)}">${esc(t("edit"))}</button>
       <button class="linkbtn" data-act="del" data-id="${esc(tx.id)}">${esc(t("del"))}</button>
     </div></td></tr>`).join("");
+  // One line per currency. Money in two currencies has no common total, so a
+  // list that spans several is footed several times rather than added up.
+  const curs = [];
+  list.forEach(tx => { const c = txCurrency(tx); if (!curs.includes(c)) curs.push(c); });
+  const foot = curs.sort().map(c => {
+    const of = list.filter(tx => txCurrency(tx) === c);
+    return `<tr><td colspan="7">${esc(t("total"))}</td><td>${esc(c)}</td>
+      <td class="num">${fmt(sum(of, x => x.debit))}</td>
+      <td class="num">${fmt(sum(of, x => x.credit))}</td>
+      <td colspan="4"></td></tr>`;
+  }).join("");
   wrap.innerHTML = `<table><thead><tr>
     <th>ID</th><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th><th>Case</th><th>Party</th>
-    <th>Project</th><th>Account</th><th class="num">${esc(t("debit"))}</th><th class="num">${esc(t("credit"))}</th>
+    <th>Project</th><th>Account</th><th>${esc(t("currency"))}</th>
+    <th class="num">${esc(t("debit"))}</th><th class="num">${esc(t("credit"))}</th>
     <th>${esc(t("status"))}</th><th>${esc(t("ref"))}</th><th>Document</th><th class="noprint"></th>
     </tr></thead><tbody>${body}</tbody>
-    <tfoot><tr><td colspan="7">${esc(t("total"))}</td>
-      <td class="num">${fmt(sum(list, x => x.debit))}</td>
-      <td class="num">${fmt(sum(list, x => x.credit))}</td>
-      <td colspan="4"></td></tr></tfoot></table>`;
+    <tfoot>${foot}</tfoot></table>`;
   wrap.querySelectorAll("[data-act]").forEach(b => {
     b.onclick = () => {
       if (b.dataset.act === "doc") { rep.doc = b.dataset.ref; return go("r_document"); }
@@ -1650,7 +1666,12 @@ const assetOfTx = tx => rowsOf("assets").find(a => a.sourceTx === tx.id) || null
    Ledger (all transactions, filterable)
    ========================================================================= */
 
-let ledgerFilter = { from:"", to:"", type:"", status:"", q:"" };
+/* The transactions screen deliberately does not follow the currency in the
+   top bar. It is the one place the whole book is read, and a day's work
+   is rarely in one currency: following the top bar hid every row in the
+   others, and hid them from the search too, which looks only at what the
+   filters have already let through. Empty here means every currency. */
+let ledgerFilter = { from:"", to:"", type:"", status:"", currency:"", q:"" };
 
 /* ---------- searching the ledger ----------
    The search box read five fields. Looking for a person, an amount, a project
@@ -1704,12 +1725,15 @@ function viewLedger(m) {
     TXTYPES.map(x => `<option ${x.v === ledgerFilter.type ? "selected" : ""}>${esc(x.v)}</option>`).join("")}</select>`));
   bar.appendChild(fld("Status | الحالة", `<select id="f_status"><option value=""></option>${
     STATUSES.map(s => `<option ${s === ledgerFilter.status ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`));
+  bar.appendChild(fld("Currency | العملة", `<select id="f_cur"><option value="">All currencies</option>${
+    currenciesInUse().map(c => `<option ${c === ledgerFilter.currency ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`));
   bar.appendChild(fld("Search | بحث", `<input id="f_q" value="${esc(ledgerFilter.q)}"
     placeholder="anything — name, amount, project, account, type, note…" style="min-width:16rem">`));
   const apply = el("button", { class:"btn sm" }, "Apply");
   const runFilter = () => {
     ledgerFilter = { from:$("#f_from").value, to:$("#f_to").value, type:$("#f_type").value,
-                     status:$("#f_status").value, q:$("#f_q").value.trim().toLowerCase() };
+                     status:$("#f_status").value, currency:$("#f_cur").value,
+                     q:$("#f_q").value.trim().toLowerCase() };
     render();
   };
   apply.onclick = runFilter;
@@ -1722,8 +1746,8 @@ function viewLedger(m) {
     if (ledgerFilter.q) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); }
   }
 
-  const before = txs({ from:ledgerFilter.from, to:ledgerFilter.to,
-                       type:ledgerFilter.type, status:ledgerFilter.status });
+  const before = txs({ from:ledgerFilter.from, to:ledgerFilter.to, type:ledgerFilter.type,
+                       status:ledgerFilter.status, currency:ledgerFilter.currency });
   const list = ledgerSearch(before, ledgerFilter.q);
   if (ledgerFilter.q)
     m.appendChild(el("div", { class:"card-note", style:"margin:-.4rem 0 .6rem" },

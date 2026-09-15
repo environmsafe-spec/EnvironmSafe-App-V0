@@ -74,9 +74,10 @@ async function run(ctx) {
 
   /* ---- on the page ---- */
   await pg.goto(ctx.appUrl + '#/ledger'); await pg.waitForTimeout(800);
-  // All currencies, so the count below is over the whole ledger rather than
-  // whichever currency the top bar happened to settle on.
-  await pg.selectOption('#curSel', ''); await pg.waitForTimeout(600);
+  // The transactions screen reads the whole book whatever the top bar says: a
+  // day's work is rarely in one currency, and money that is on the screen must
+  // be findable from the search box without anyone guessing the currency first.
+  await pg.selectOption('#curSel', 'USD'); await pg.waitForTimeout(600);
   await pg.fill('#f_q', 'yasmeen');
   await pg.locator('.toolbar button:has-text("Apply")').click(); await pg.waitForTimeout(600);
   const shown = await pg.evaluate(() => ({
@@ -87,12 +88,33 @@ async function run(ctx) {
   check('and says how many of how many matched, over what is in view',
         /1 of 3 entries match/.test(shown.note), shown.note);
 
-  // The count must follow the view: narrow to one currency and it says so.
-  await pg.selectOption('#curSel', 'YER'); await pg.waitForTimeout(700);
-  const inYer = await pg.evaluate(() =>
-    [...document.querySelectorAll('.card-note')].map(n => n.textContent).join(' '));
-  check('the count reflects the currency in view, not the whole file',
-        /1 of 2 entries match/.test(inYer), inYer);
+  // The top bar must not be able to hide a row from this screen — that is what
+  // made entries look lost. A YER row stays findable while the bar says USD.
+  await pg.fill('#f_q', '125000');
+  await pg.locator('.toolbar button:has-text("Apply")').click(); await pg.waitForTimeout(600);
+  const yerRow = await pg.evaluate(() =>
+    [...document.querySelectorAll('tbody tr')].map(r => r.children[0].textContent.trim()));
+  check('a YER amount is found while the top bar says USD',
+        yerRow.join() === 'TRX-0330', yerRow.join() + ' (top bar: USD)');
+
+  // Narrowing is still possible, but only when asked for on this screen.
+  await pg.fill('#f_q', '');
+  await pg.selectOption('#f_cur', 'YER');
+  await pg.locator('.toolbar button:has-text("Apply")').click(); await pg.waitForTimeout(600);
+  const onlyYer = await pg.evaluate(() => ({
+    rows: [...document.querySelectorAll('tbody tr')].length,
+    curs: [...new Set([...document.querySelectorAll('tbody tr')].map(r => r.children[7].textContent.trim()))]
+  }));
+  check("the screen's own currency filter still narrows",
+        onlyYer.curs.join() === 'YER' && onlyYer.rows === 2, JSON.stringify(onlyYer));
+
+  // And a list spanning currencies is footed per currency, never added up.
+  await pg.selectOption('#f_cur', '');
+  await pg.locator('.toolbar button:has-text("Apply")').click(); await pg.waitForTimeout(600);
+  const feet = await pg.evaluate(() =>
+    [...document.querySelectorAll('tfoot tr')].map(r => r.children[1].textContent.trim()));
+  check('each currency is totalled on its own line', feet.length > 1 &&
+        feet.length === new Set(feet).size, JSON.stringify(feet));
 
   check('no page errors', pg.errors.length === 0, pg.errors.join(' | '));
   await pg.ctx.close();
