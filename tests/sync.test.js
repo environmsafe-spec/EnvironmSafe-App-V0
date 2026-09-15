@@ -89,6 +89,29 @@ module.exports = { name: 'sync', run: async (ctx) => {
             await A.evaluate(() => { const ids = DB.accounts.map(a => a.id);
                                      return ids.length === new Set(ids).size; }));
 
+  // Work that has not reached the cloud must say so on every screen. Entries
+  // sat unsent on one phone for two days with nothing on screen to show it.
+  const badge = pg => pg.evaluate(() => { const b = document.getElementById('pendBtn');
+    return { hidden: b.hidden, text: b.textContent, bad: b.classList.contains('bad') }; });
+  await sync(A);
+  ctx.check('nothing is announced when everything has been sent', (await badge(A)).hidden);
+
+  await A.ctx.setOffline(true);
+  await addInvoice(A, 'INV-UNSENT');
+  await sync(A);                                   // fails, and says nothing aloud
+  let b = await badge(A);
+  ctx.check('work that never left the device is announced',
+            !b.hidden && /1 waiting to send/.test(b.text), JSON.stringify(b));
+  ctx.check('and a failed attempt is marked, not hidden', b.bad && !b.hidden, JSON.stringify(b));
+
+  await A.ctx.setOffline(false);
+  await sync(A);
+  b = await badge(A);
+  ctx.check('the announcement clears once the work is through', b.hidden, JSON.stringify(b));
+  await sync(B);
+  ctx.check('and the entry really did arrive',
+            (await readBooks(B)).refs.includes('INV-UNSENT'));
+
   ctx.check('nothing is left waiting to send', await A.evaluate(() => pendingCount()) === 0);
   ctx.check('no uncaught errors', A.errors.length === 0 && B.errors.length === 0 &&
             C.errors.length === 0 && D.errors.length === 0,

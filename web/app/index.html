@@ -72,6 +72,12 @@
   .topbar .spacer { flex:0 0 auto; }
   .whoami { font-size:.75rem; color:var(--navy-ink); opacity:.85; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis; max-width:11rem; }
+  /* Work that has not reached the cloud yet must be visible from every screen.
+     Entries sat unsent on one phone for two days with nothing on the screen to
+     say so, and looked lost from everywhere else. */
+  .pend { background:var(--gold) !important; color:#131A2A !important;
+    border:1px solid var(--gold) !important; font-weight:700; }
+  .pend.bad { background:#C0392B !important; border-color:#C0392B !important; color:#fff !important; }
   .topbar select, .topbar button {
     background:rgba(255,255,255,.1); color:var(--navy-ink); border:1px solid rgba(255,255,255,.22);
     border-radius:3px; padding:.35rem .5rem; font:inherit; font-size:.8rem; cursor:pointer;
@@ -271,6 +277,7 @@
   </div>
   <div class="spacer"></div>
   <select id="curSel" title="Currency"></select>
+  <button id="pendBtn" class="pend" hidden></button>
   <span id="whoami" class="whoami"></span>
   <button id="acctBtn" title="Account">Account</button>
   <select id="langSel" title="Language">
@@ -516,6 +523,7 @@ function save() {
   try { localStorage.setItem(DB_KEY, JSON.stringify(DB)); }
   catch (e) { toast("Storage is full — export a backup and remove old attachments."); }
   scheduleSync();
+  if (typeof refreshPending === "function") refreshPending();
 }
 /* The starter rows every empty device begins with are marked, because a device
    that turns out to be joining a company that already keeps books must give
@@ -954,6 +962,7 @@ window.addEventListener("hashchange", () => {
 
 function render() {
   renderNav();
+  if (typeof refreshPending === "function") refreshPending();
   if (USER) {
     // never leave the user staring at an empty screen because the chosen
     // currency holds nothing while their data sits in another one
@@ -1448,7 +1457,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.9.2";
+const APP_VERSION = "1.9.3";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -3779,6 +3788,7 @@ async function syncNow(quiet) {
       pulled = await syncPull();
     }
     SYNC.lastAt = new Date().toISOString();
+    SYNC_LAST_FAIL = "";
     syncSave();
     if (pulled) save();
     // With the books safely up, take the day's copy if one is due.
@@ -3786,9 +3796,10 @@ async function syncNow(quiet) {
     if (!quiet) toast("Synced — " + pushed + " sent, " + pulled + " received");
     return { pushed: pushed, pulled: pulled };
   } catch (e) {
-    if (!quiet) toast(cloudMessage(e));
+    SYNC_LAST_FAIL = cloudMessage(e);
+    if (!quiet) toast(SYNC_LAST_FAIL);
     return null;
-  } finally { SYNC_RUNNING = false; }
+  } finally { SYNC_RUNNING = false; if (typeof refreshPending === "function") refreshPending(); }
 }
 
 /* A quiet sync shortly after a change, so ordinary use keeps the books current
@@ -4491,6 +4502,25 @@ function modal(title, fields, onSave) {
    Boot
    ========================================================================= */
 
+/* Whether the last attempt to reach the cloud got through. A quiet background
+   sync says nothing when it fails, which is how a phone came to hold two days
+   of entries that every other device thought had never been made. */
+let SYNC_LAST_FAIL = "";
+
+function refreshPending() {
+  const b = document.getElementById("pendBtn");
+  if (!b) return;
+  const n = (typeof USER !== "undefined" && USER) ? pendingCount() : 0;
+  b.hidden = !n;
+  if (!n) return;
+  b.classList.toggle("bad", !!SYNC_LAST_FAIL);
+  b.textContent = n + (LANG === "ar" ? " بانتظار الإرسال" : " waiting to send");
+  b.title = SYNC_LAST_FAIL
+    ? "These are only on this device — the last attempt to send them failed: "
+      + SYNC_LAST_FAIL + ". Tap to try again."
+    : "These are only on this device until they are sent. Tap to send them now.";
+}
+
 function applyChrome() {
   document.documentElement.lang = LANG;
   document.documentElement.dir = LANG === "ar" ? "rtl" : "ltr";
@@ -4511,6 +4541,12 @@ $("#langSel").onchange = e => {
   applyChrome(); if (USER) render(); else loginScreen();
 };
 $("#acctBtn").onclick = accountMenu;
+$("#pendBtn").onclick = async () => {
+  if (!cloudSignedIn()) { toast("Sign in to the cloud account first."); return go("data"); }
+  const r = await syncNow(false);
+  refreshPending();
+  if (r && r.pulled) render();
+};
 
 function fillCurrencySelect() {
   const list = currencyChoices();
