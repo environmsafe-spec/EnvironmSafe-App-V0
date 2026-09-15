@@ -651,8 +651,13 @@ async function checkPassword(user, password) {
   if (!user || !user.pw) return false;
   return (await hashPw(password, user.salt)) === user.pw;
 }
-const userByName = name =>
-  rowsOf("users").find(u => (u.username || "").toLowerCase() === String(name || "").trim().toLowerCase());
+/* Every record answering to a name, not merely the first. Each device creates
+   its own "admin" when it starts empty, and syncing brings them all together —
+   so one name can belong to several records, each with its own password. Taking
+   only the first locked people out of their own books. */
+const usersByName = name =>
+  rowsOf("users").filter(u => (u.username || "").toLowerCase() === String(name || "").trim().toLowerCase());
+const userByName = name => usersByName(name)[0];
 
 async function ensureAdmin() {
   if (rowsOf("users").length) return;
@@ -1457,7 +1462,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.9.3";
+const APP_VERSION = "1.9.4";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -3879,6 +3884,7 @@ async function driveToken(interactive) {
         if (!r || !r.access_token) return reject(new Error("Google did not grant access."));
         DRIVE.token = r.access_token;
         DRIVE.expiresAt = Date.now() + ((Number(r.expires_in) || 3600) * 1000);
+        DRIVE.origin = location.origin;      // where Google let us in
         driveSave();
         resolve(DRIVE.token);
       },
@@ -3972,8 +3978,16 @@ async function driveBackup(quiet) {
 }
 
 /** One copy a day, taken quietly after the books have been put away. */
+/* The daily copy must never take over the screen. The Google client id travels
+   with the books, so a device opened at a new web address inherits it without
+   Google having been told that address is allowed — and Google answers a token
+   request there with a full-page "Access blocked" of its own, in the middle of
+   an ordinary sync. The copy is therefore only taken by itself where Google has
+   already let this address through; anywhere else it waits to be asked by hand
+   from Backup & sync, which is where the refusal can be explained. */
 function driveMaybeBackup() {
   if (!driveSetUp()) return;
+  if (DRIVE.origin !== location.origin) return;
   const last = DRIVE.lastAt ? Date.parse(DRIVE.lastAt) : 0;
   if (Date.now() - last < DRIVE_EVERY) return;
   driveBackup(true);
@@ -4594,9 +4608,14 @@ function loginScreen(message) {
   form.onsubmit = async e => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(form).entries());
-    const u = userByName(f.username);
-    if (!u || u.active === "No" || !(await checkPassword(u, f.password)))
-      return loginScreen("Wrong username or password.");
+    // The password decides which record this is, not the order they happen to
+    // sit in: any active record of that name whose password matches will do.
+    let u = null;
+    for (const c of usersByName(f.username)) {
+      if (c.active === "No") continue;
+      if (await checkPassword(c, f.password)) { u = c; break; }
+    }
+    if (!u) return loginScreen("Wrong username or password.");
     USER = u;
     sessionStorage.setItem(SESSION_KEY, u.id);
     chromeForUser();

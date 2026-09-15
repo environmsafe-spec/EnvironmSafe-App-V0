@@ -43,6 +43,37 @@ module.exports = { name: 'cloud account', run: async (ctx) => {
   await pg.locator('button:has-text("Create account")').click(); await pg.waitForTimeout(900);
   ctx.check('a sign-up awaiting email confirmation is explained', /Confirm it from your email/i.test(await toasts(pg)));
 
+  /* Every device that starts empty makes its own "admin", and syncing brings
+     them together, so one name ends up on several records with different
+     passwords. Signing in must be decided by the password, not by which record
+     happens to sit first — otherwise people are locked out of their own books. */
+  await pg.evaluate(async () => {
+    const mine = DB.users[0];
+    // Two more records of the same name, as other devices would have made them.
+    for (const pw of ['OtherDevice#1', 'OtherDevice#2']) {
+      const other = Object.assign({}, mine, { uid: newUid(), id: 'USR-XX-' + pw.slice(-1),
+                                              mustChange: 'No' });
+      await setPassword(other, pw);
+      DB.users.unshift(other);
+    }
+    save();
+  });
+  const signInAs = async (name, pw) => {
+    await pg.evaluate(() => { sessionStorage.clear(); loginScreen(); });
+    await pg.waitForTimeout(300);
+    await pg.fill('input[name="username"]', name);
+    await pg.fill('input[name="password"]', pw);
+    await pg.locator('form button:has-text("Sign in")').click();
+    await pg.waitForTimeout(600);
+    return pg.evaluate(() => !!USER && USER.id);
+  };
+  ctx.check('the password decides which record you are, not the order',
+            await signInAs('admin', 'Aden#2026Test') !== false);
+  ctx.check('another device\'s password of the same name also works',
+            await signInAs('admin', 'OtherDevice#1') !== false);
+  ctx.check('and a password belonging to none of them still fails',
+            await signInAs('admin', 'NotAnyOfThem#9') === false);
+
   ctx.check('no uncaught errors', pg.errors.length === 0, pg.errors.slice(0,2).join(' | '));
   await pg.ctx.close();
 }};

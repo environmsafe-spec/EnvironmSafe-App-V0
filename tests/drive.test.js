@@ -88,6 +88,29 @@ module.exports = { name: 'drive backup', run: async (ctx) => {
   ctx.check('and says so in plain words', /connection|later/i.test(await toasts(pg)), await toasts(pg));
   await pg.ctx.setOffline(false);
 
+  /* The daily copy must never take over the screen. The Google client id
+     travels with the books, so a device opened at a new web address inherits it
+     without Google having been told that address is allowed — and Google
+     answers there with a full-page refusal of its own, in the middle of an
+     ordinary sync. */
+  const autoTried = () => pg.evaluate(() => {
+    const before = window.__driveAsked || 0;
+    DRIVE.lastAt = "2020-01-01T00:00:00Z"; driveSave();
+    driveMaybeBackup();
+    return (window.__driveAsked || 0) > before;
+  });
+  await pg.evaluate(() => {
+    window.__driveAsked = 0;
+    const real = driveToken;
+    window.driveToken = (...a) => { window.__driveAsked++; return real(...a); };
+  });
+  await pg.evaluate(() => { DRIVE.origin = "https://somewhere-else.example"; driveSave(); });
+  ctx.check('the daily copy is not attempted at an address Google has not allowed',
+            await autoTried() === false);
+  await pg.evaluate(() => { DRIVE.origin = location.origin; driveSave(); });
+  ctx.check('and is attempted where Google has already let us in',
+            await autoTried() === true);
+
   ctx.check('no uncaught errors', pg.errors.length === 0, pg.errors.slice(0,2).join(' | '));
   await pg.ctx.close();
 }};
