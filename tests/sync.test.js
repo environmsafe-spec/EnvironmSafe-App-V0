@@ -49,9 +49,50 @@ module.exports = { name: 'sync', run: async (ctx) => {
   ctx.check('a replacement phone recovers the whole ledger',
             back.transactions === 2 && back.customers === 1, JSON.stringify(back.refs));
 
-  ctx.check('nothing is left waiting to send', await A.evaluate(() => pendingCount()) === 0);
-  ctx.check('no uncaught errors', A.errors.length === 0 && B.errors.length === 0 && C.errors.length === 0,
-            [...A.errors, ...B.errors, ...C.errors].slice(0,2).join(' | '));
+  // A page boundary must not swallow records. The cut is deliberately put in
+  // the middle of a group written in one instant — the case that loses records
+  // for good, because the next pull asks only for rows *after* that instant.
+  ctx.mock.maxRows = 3;
+  await A.evaluate(() => {
+    for (let i = 1; i <= 7; i++)
+      DB.transactions.push({ uid: newUid(), id: 'TRX-PAGE-' + i, refNo: 'INV-PAGE-' + i,
+                             date: '2026-07-01', type: 'RECEIPT', debit: 0, credit: 10,
+                             currency: 'USD', status: 'Approved' });
+    save();
+  });
+  await sync(A);                                   // one batch, so one timestamp
 
-  await A.ctx.close(); await B.ctx.close(); await C.ctx.close();
+  const D = await newDevice(ctx.browser, ctx.cloudUrl, 'D');
+  await cloudIn(D, ctx.account);
+  await sync(D);
+  const pagedOf = async p => (await readBooks(p)).refs.filter(r => r.startsWith('INV-PAGE-')).length;
+  ctx.check('a page boundary does not swallow records', await pagedOf(D) === 7,
+            'received ' + (await pagedOf(D)) + ' of 7');
+  // And any that were cut off must not be lost for good: syncing again is not
+  // allowed to be what rescues them, but it must not hide a loss either.
+  await sync(D);
+  ctx.check('none are left behind for good', await pagedOf(D) === 7,
+            'still ' + (await pagedOf(D)) + ' of 7');
+  ctx.mock.maxRows = 1000;
+
+  // A replacement phone starts with starter accounts numbered ACC-0001 upward.
+  // Sending those up would leave the company with two records answering to
+  // ACC-0001 — and every transaction pointing at one of them.
+  const accIds = await D.evaluate(() => DB.accounts.map(a => a.id));
+  const dup = accIds.filter((x, i) => accIds.indexOf(x) !== i);
+  ctx.check('a joining device does not duplicate the company accounts',
+            dup.length === 0, 'duplicated: ' + dup.join());
+  ctx.check('it gives up its starter rows rather than send them',
+            await D.evaluate(() => DB.accounts.every(a => !a.starter)));
+  await sync(A);
+  ctx.check('and the company keeps one account per number',
+            await A.evaluate(() => { const ids = DB.accounts.map(a => a.id);
+                                     return ids.length === new Set(ids).size; }));
+
+  ctx.check('nothing is left waiting to send', await A.evaluate(() => pendingCount()) === 0);
+  ctx.check('no uncaught errors', A.errors.length === 0 && B.errors.length === 0 &&
+            C.errors.length === 0 && D.errors.length === 0,
+            [...A.errors, ...B.errors, ...C.errors, ...D.errors].slice(0,2).join(' | '));
+
+  await A.ctx.close(); await B.ctx.close(); await C.ctx.close(); await D.ctx.close();
 }};

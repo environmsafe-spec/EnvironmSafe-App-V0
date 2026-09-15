@@ -17,7 +17,9 @@ function startMockSupabase(port, opts) {
   const COMPANY = 'company-uuid-1';
   const rows    = new Map();
   let seq = 0;
-  // Monotonic timestamps so "changed since" ordering is deterministic.
+  // Monotonic timestamps so "changed since" ordering is deterministic. One
+  // stamp per request, not per row: a real database writes a whole batch in a
+  // single instant, so records genuinely do share an updated_at.
   const stamp = () => new Date(Date.UTC(2026, 7, 20) + (++seq) * 1000).toISOString();
 
   const srv = http.createServer((req, res) => {
@@ -66,19 +68,27 @@ function startMockSupabase(port, opts) {
 
         if (u.startsWith('/rest/v1/es_records')) {
           if (req.method === 'POST') {
+            const at = stamp();
             (Array.isArray(p) ? p : [p]).forEach(r => {
               rows.set(r.collection + '/' + r.record_id, {
                 company_id:r.company_id, collection:r.collection, record_id:r.record_id,
-                data:r.data, deleted:!!r.deleted, updated_at:stamp() });
+                data:r.data, deleted:!!r.deleted, updated_at:at });
             });
             return send(201, null);
           }
           if (req.method === 'GET') {
             const m = /updated_at=gt\.([^&]+)/.exec(u);
             const since = m ? decodeURIComponent(m[1]) : '1970-01-01T00:00:00Z';
-            return send(200, [...rows.values()]
+            const one = (re, dflt) => { const x = re.exec(u); return x ? Number(x[1]) : dflt; };
+            const offset = one(/[?&]offset=(\d+)/, 0);
+            // PostgREST answers with at most max-rows however large a limit is
+            // asked for, and says nothing about having held anything back.
+            const limit  = Math.min(one(/[?&]limit=(\d+)/, srv.maxRows), srv.maxRows);
+            const all = [...rows.values()]
               .filter(r => r.updated_at > since)
-              .sort((a, b) => a.updated_at.localeCompare(b.updated_at)));
+              .sort((a, b) => a.updated_at.localeCompare(b.updated_at)
+                           || a.record_id.localeCompare(b.record_id));
+            return send(200, all.slice(offset, offset + limit));
           }
         }
       }
@@ -131,6 +141,9 @@ function startMockSupabase(port, opts) {
   srv.driveFiles = new Map();
   srv.driveSeq = 0;
   srv.driveFails = 0;
+  // What the real server caps a single answer at. Lowered in tests that need
+  // to prove the app reads past the end of one page.
+  srv.maxRows = 1000;
   srv.stored = () => rows;
   return new Promise(r => srv.listen(port, '127.0.0.1', () => r(srv)));
 }
