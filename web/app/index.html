@@ -826,12 +826,48 @@ const auditOf = (table, recId) => (DB.audit || [])
   .filter(a => a.table === table && a.recId === recId)
   .sort((a, b) => (b.at || "").localeCompare(a.at || ""));
 
+/* =========================================================================
+   What an entry must say before it can count.
+
+   A report can only answer a question about an entry that carries the field
+   the question is about. Salaries filed against nobody made the employee
+   report read zero for months while the money had plainly been paid — the
+   figures were not wrong, the entries simply could not be asked.
+
+   These are checked when an entry is approved, not while it is being typed.
+   Refusing a half-finished entry at the moment of saving throws away what
+   somebody was in the middle of writing, which is how a system teaches people
+   to keep their real records somewhere else. Type it, save it, finish it —
+   but nothing joins the books until it can be read.
+   ========================================================================= */
+
+function missingFields(tx) {
+  const ty = typeOf(tx.type);
+  const out = [];
+  if (!ty.fin) return out;                       // a quotation is not money yet
+  if (ty.party === "customer" && !tx.customerId) out.push("customer");
+  if (ty.party === "supplier" && !tx.supplierId) out.push("supplier");
+  if (ty.party === "employee" && !tx.employeeId) out.push("employee");
+  if (ty.cash && !tx.accountId)                  out.push("bank or cash account");
+  // Every figure in this business belongs to a job; a project report that
+  // quietly leaves entries out is worse than no project report.
+  if (!tx.projectId)                             out.push("project");
+  return out;
+}
+const isIncomplete = tx => missingFields(tx).length > 0;
+const saysMissing  = list =>
+  list.length === 1 ? `no ${list[0]}`
+                    : `no ${list.slice(0, -1).join(", ")} and no ${list[list.length - 1]}`;
+
 const PENDING    = "Draft";
 const approvalOn = () => CO().requireApproval === "Yes";
-const isPending  = tx => approvalOn() && tx.status === PENDING;
+/* Only money waits. A quotation or a purchase order counts nowhere in the
+   books whatever its status, so holding one back approves nothing and would
+   only bury the entries that do matter under paperwork that does not. */
+const isPending  = tx => approvalOn() && tx.status === PENDING && typeOf(tx.type).fin;
 /** What the books count: never a cancelled row, and never one still waiting. */
 const counted    = tx => live(tx) && !isPending(tx);
-const pendingTxs = () => DB.transactions.filter(x => live(x) && x.status === PENDING);
+const pendingTxs = () => DB.transactions.filter(x => live(x) && isPending(x));
 
 /* =========================================================================
    Settling documents — which invoice a payment actually pays.
@@ -1529,10 +1565,12 @@ function viewDaily(m) {
     if (approvalOn() && tx.status === "Approved") approveTx(tx);
     DB.transactions.push(tx);
     noteChange("create", "transactions", tx, [], `${tx.type} ${fmt(rawAmount(tx))} ${txCurrency(tx)}`);
+    const short = missingFields(tx);
     const asset = f.isAsset === "Yes" ? registerAssetFrom(tx, f) : null;
     save();
     entryDraft = { date:f.date, type:f.type, caseNo:f.caseNo, status:"Draft" };
-    toast(asset ? `Saved ${tx.id} · asset ${asset.id} added to the register` : `Saved ${tx.id}`);
+    toast((asset ? `Saved ${tx.id} · asset ${asset.id} added to the register` : `Saved ${tx.id}`)
+      + (short.length ? ` · ${saysMissing(short)} yet — it cannot be approved until there is` : ""));
     render();
   };
 
@@ -1653,7 +1691,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.12.0";
+const APP_VERSION = "1.13.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -1727,7 +1765,8 @@ function txTable(list, opts = {}) {
     <td class="num">${num(tx.debit) ? fmt(tx.debit) : ""}</td>
     <td class="num">${num(tx.credit) ? fmt(tx.credit) : ""}</td>
     <td><span class="pill ${esc((tx.status||"draft").toLowerCase())}">${esc(tx.status)}</span>${
-      isPending(tx) ? ` <small class="card-note">waiting</small>` : ""}</td>
+      isPending(tx) ? ` <small class="card-note">waiting</small>` : ""}${
+      isIncomplete(tx) ? ` <small class="card-note" title="${esc(saysMissing(missingFields(tx)))}">incomplete</small>` : ""}</td>
     <td>${esc(tx.refNo || "")}</td><td>${esc(tx.docRef || "")}</td>
     <td class="noprint"><div class="rowactions">
       ${tx.refNo ? `<button class="linkbtn" data-act="doc" data-ref="${esc(tx.refNo)}">Form</button>` : ""}
@@ -1909,7 +1948,7 @@ const assetOfTx = tx => rowsOf("assets").find(a => a.sourceTx === tx.id) || null
    is rarely in one currency: following the top bar hid every row in the
    others, and hid them from the search too, which looks only at what the
    filters have already let through. Empty here means every currency. */
-let ledgerFilter = { from:"", to:"", type:"", status:"", currency:"", q:"" };
+let ledgerFilter = { from:"", to:"", type:"", status:"", currency:"", only:"", q:"" };
 
 /* ---------- searching the ledger ----------
    The search box read five fields. Looking for a person, an amount, a project
@@ -1952,6 +1991,12 @@ function ledgerSearch(list, q) {
    screen to decide without opening it — and the approver's name and the moment
    recorded on whatever they pass, because "who said this was right" is the
    question an approval exists to answer. */
+/** Refuses with what is missing, or "" when the entry can be read. */
+function approvalBlocked(tx) {
+  const miss = missingFields(tx);
+  return miss.length ? `${tx.id} has ${saysMissing(miss)} — a report could not answer about it.` : "";
+}
+
 function approveTx(tx) {
   const from = tx.status;
   tx.status = "Approved";
@@ -2063,7 +2108,9 @@ function viewApprovals(m) {
     <td class="num">${fmt(rawAmount(x))}</td>
     <td>${esc(x.refNo || "")}</td>
     <td class="noprint"><div class="rowactions">
-      <button class="linkbtn" data-ap="${esc(x.id)}">Approve</button>
+      <button class="linkbtn" data-ap="${esc(x.id)}"${
+        isIncomplete(x) ? ` title="${esc(saysMissing(missingFields(x)))}"` : ""}>${
+        isIncomplete(x) ? "Needs " + esc(missingFields(x)[0]) : "Approve"}</button>
       <button class="linkbtn" data-ed="${esc(x.id)}">${esc(t("edit"))}</button>
     </div></td></tr>`).join("");
   const w = el("div", { class:"tablewrap" });
@@ -2075,6 +2122,8 @@ function viewApprovals(m) {
     if (!canApprove()) return toast("Only an Administrator or Reviewer can approve.");
     const tx = DB.transactions.find(x => x.id === b.dataset.ap);
     if (!tx) return;
+    const bad = approvalBlocked(tx);
+    if (bad) return toast(bad + " Open it and fill that in first.");
     approveTx(tx); save(); render();
     toast(`${tx.id} approved`);
   });
@@ -2091,14 +2140,23 @@ function viewApprovals(m) {
     const bar = el("div", { style:"margin-top:.8rem;display:flex;gap:.5rem;flex-wrap:wrap" });
     const all = el("button", { class:"btn gold" }, `Approve all ${waiting.length}`);
     all.onclick = () => {
+      const ready = waiting.filter(x => !isIncomplete(x));
+      const held  = waiting.length - ready.length;
+      if (!ready.length)
+        return toast(`None of the ${waiting.length} can be approved yet — each is missing something.`);
+      // The figure must be of what is actually about to be approved, not of
+      // everything on the screen, or the confirmation lies about the money.
       const per = {};
-      waiting.forEach(x => { const c = txCurrency(x); per[c] = (per[c] || 0) + rawAmount(x); });
+      ready.forEach(x => { const c = txCurrency(x); per[c] = (per[c] || 0) + rawAmount(x); });
       const money = Object.keys(per).sort().map(c => `${fmt(per[c])} ${c}`).join(", ");
-      if (!confirm(`Approve all ${waiting.length} waiting entries?\n\n${money}\n\n` +
+      if (!confirm(`Approve ${ready.length} waiting ${ready.length === 1 ? "entry" : "entries"}?` +
+                   `\n\n${money}\n\n` +
+                   (held ? `${held} more ${held === 1 ? "is" : "are"} missing a project, a party or an ` +
+                           `account and will stay waiting.\n\n` : "") +
                    `They start counting in every report as soon as you do.`)) return;
-      waiting.forEach(approveTx);
+      ready.forEach(approveTx);
       save(); render();
-      toast(`${waiting.length} entries approved`);
+      toast(`${ready.length} approved` + (held ? ` · ${held} still need filling in` : ""));
     };
     bar.appendChild(all);
     card.appendChild(bar);
@@ -2121,6 +2179,13 @@ function viewLedger(m) {
     TXTYPES.map(x => `<option ${x.v === ledgerFilter.type ? "selected" : ""}>${esc(x.v)}</option>`).join("")}</select>`));
   bar.appendChild(fld("Status | الحالة", `<select id="f_status"><option value=""></option>${
     STATUSES.map(s => `<option ${s === ledgerFilter.status ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>`));
+  bar.appendChild(fld("Show | إظهار",
+    `<select id="f_only">
+       <option value="">Everything</option>
+       <option value="incomplete" ${ledgerFilter.only === "incomplete" ? "selected" : ""}>Only incomplete</option>
+       <option value="waiting" ${ledgerFilter.only === "waiting" ? "selected" : ""}>Only waiting for approval</option>
+       <option value="unapplied" ${ledgerFilter.only === "unapplied" ? "selected" : ""}>Only money not yet applied</option>
+     </select>`));
   bar.appendChild(fld("Currency | العملة", `<select id="f_cur"><option value="">All currencies</option>${
     currenciesInUse().map(c => `<option ${c === ledgerFilter.currency ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`));
   bar.appendChild(fld("Search | بحث", `<input id="f_q" value="${esc(ledgerFilter.q)}"
@@ -2129,7 +2194,7 @@ function viewLedger(m) {
   const runFilter = () => {
     ledgerFilter = { from:$("#f_from").value, to:$("#f_to").value, type:$("#f_type").value,
                      status:$("#f_status").value, currency:$("#f_cur").value,
-                     q:$("#f_q").value.trim().toLowerCase() };
+                     only:$("#f_only").value, q:$("#f_q").value.trim().toLowerCase() };
     render();
   };
   apply.onclick = runFilter;
@@ -2145,11 +2210,20 @@ function viewLedger(m) {
   const before = txs({ from:ledgerFilter.from, to:ledgerFilter.to, type:ledgerFilter.type,
                        status:ledgerFilter.status, currency:ledgerFilter.currency,
                        includePending:true });
-  const list = ledgerSearch(before, ledgerFilter.q);
+  const only = { incomplete: isIncomplete,
+                 waiting: isPending,
+                 unapplied: x => settlesDocs(x) && unappliedOf(x) > 0.005 }[ledgerFilter.only];
+  // "of how many" must count what the search was actually given, or the note
+  // says the search found less than it did.
+  const pool = only ? before.filter(only) : before;
+  const list = ledgerSearch(pool, ledgerFilter.q);
   if (ledgerFilter.q)
     m.appendChild(el("div", { class:"card-note", style:"margin:-.4rem 0 .6rem" },
-      `${list.length} of ${before.length} ${before.length === 1 ? "entry" : "entries"} match “${
+      `${list.length} of ${pool.length} ${pool.length === 1 ? "entry" : "entries"} match “${
         esc(ledgerFilter.q)}”`));
+  else if (only)
+    m.appendChild(el("div", { class:"card-note", style:"margin:-.4rem 0 .6rem" },
+      `${pool.length} of ${before.length} ${before.length === 1 ? "entry" : "entries"} shown`));
   m.appendChild(txTable(list));
 }
 

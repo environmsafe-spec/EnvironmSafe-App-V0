@@ -10,9 +10,12 @@ module.exports = { name: 'approving entries', run: async (ctx) => {
   await pg.evaluate(() => {
     DB.customers.push({ uid:newUid(), id:'CUS-1', nameEn:'Go Green', opening:0 });
     DB.accounts.push({ uid:newUid(), id:'ACC-9', nameEn:'USD-Kur', currency:'USD', opening:0 });
+    DB.projects.push({ uid:newUid(), id:'PRJ-1', nameEn:'Go Green-1', status:'active' });
+    // Complete entries: this suite is about approval, not about what an entry
+    // must say before it can be approved, which has its own checks.
     const add = (id, status, amt) => DB.transactions.push({ uid:newUid(), id, date:'2026-07-10',
-      type:'INVOICE OUT', phase:'INVOICE OUT', customerId:'CUS-1', currency:'USD', fxRate:1,
-      debit:0, credit:amt, status, refNo:'INV-' + id });
+      type:'INVOICE OUT', phase:'INVOICE OUT', customerId:'CUS-1', projectId:'PRJ-1',
+      currency:'USD', fxRate:1, debit:0, credit:amt, status, refNo:'INV-' + id });
     add('TRX-A', 'Approved', 1000);
     add('TRX-D', 'Draft', 500);
     CUR = 'USD'; FX_ON = false;
@@ -39,7 +42,8 @@ module.exports = { name: 'approving entries', run: async (ctx) => {
   await pg.evaluate(() => {
     const inv = DB.transactions.find(x => x.id === 'TRX-A');
     DB.transactions.push({ uid:newUid(), id:'TRX-P', date:'2026-07-20', type:'RECEIPT',
-      phase:'PAYMENT', customerId:'CUS-1', accountId:'ACC-9', currency:'USD', fxRate:1,
+      phase:'PAYMENT', customerId:'CUS-1', accountId:'ACC-9', projectId:'PRJ-1',
+      currency:'USD', fxRate:1,
       debit:0, credit:1000, status:'Draft', applied:[{ uid:inv.uid, amount:1000 }] });
     save();
   });
