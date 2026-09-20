@@ -350,6 +350,10 @@ const TXTYPES = [
   { v:"PO IN",          ar:"أمر شراء وارد",     phase:"PO IN",          party:"customer", fin:false, side:"credit" },
   { v:"PO OUT",         ar:"أمر شراء صادر",     phase:"PO OUT",         party:"supplier", fin:false, side:"debit" },
   { v:"INVOICE OUT",    ar:"فاتورة مبيعات",     phase:"INVOICE OUT",    party:"customer", fin:true, side:"credit", flow:"revenue" },
+  /* Men supplied to a client's site for as long as the client needs them —
+     billed as a service, so it earns exactly as an invoice does. */
+  { v:"ON CALL MANPOWER SERVICES", ar:"خدمات عمالة تحت الطلب", phase:"INVOICE OUT",
+    party:"customer", fin:true, side:"credit", flow:"revenue" },
   { v:"INVOICE IN",     ar:"فاتورة مشتريات",    phase:"INVOICE IN",     party:"supplier", fin:true, side:"debit",  flow:"cost" },
   { v:"SALES RETURN",   ar:"مرتجع مبيعات",      phase:"INVOICE OUT",    party:"customer", fin:true, side:"debit",  flow:"revenue_return", against:1 },
   { v:"PURCHASE RETURN",ar:"مرتجع مشتريات",     phase:"INVOICE IN",     party:"supplier", fin:true, side:"credit", flow:"cost_return",    against:1 },
@@ -742,9 +746,32 @@ const isRefundOut      = tx => tx.type === "REFUND TO CUSTOMER";
 const isRefundIn       = tx => tx.type === "REFUND FROM SUPPLIER";
 
 /** Sales less what came back. */
-const netRevenue = list => sum(list.filter(isRevenue), amountOf) - sum(list.filter(isSalesReturn), amountOf);
+/* Money the books have not been told about through a document.
+
+   This office works cash first: money arrives as a receipt and an invoice is
+   raised only sometimes. Counting revenue from invoices alone therefore missed
+   almost all of it — a job that took 11,900 in and spent 2,400 read as a loss,
+   because only the spending had a document behind it. The same on the other
+   side: with no supplier bills entered at all, every payment to a supplier
+   counted as no cost whatsoever.
+
+   So money that no document accounts for is counted as what it plainly is. The
+   part of a receipt already put against an invoice is left alone, because the
+   invoice has already been counted — which is why applying money to documents
+   and counting profit are the same question, and why this stays right by
+   itself as the office starts applying receipts. */
+const settlesCustomer = tx => { const y = typeOf(tx.type); return !!y.cash && y.party === "customer"; };
+const settlesSupplier = tx => { const y = typeOf(tx.type); return !!y.cash && y.party === "supplier"; };
+const uninvoiced = list => sum(list.filter(x => settlesCustomer(x) && isCashIn(x)), unappliedOf)
+                         - sum(list.filter(x => settlesCustomer(x) && isCashOut(x)), unappliedOf);
+const unbilled   = list => sum(list.filter(x => settlesSupplier(x) && isCashOut(x) && !isCapital(x)), unappliedOf)
+                         - sum(list.filter(x => settlesSupplier(x) && isCashIn(x)), unappliedOf);
+
+const invoicedRevenue = list => sum(list.filter(isRevenue), amountOf) - sum(list.filter(isSalesReturn), amountOf);
+const netRevenue = list => invoicedRevenue(list) + uninvoiced(list);
 /** Purchases less what we sent back. */
-const netCost    = list => sum(list.filter(isCost), amountOf) - sum(list.filter(isPurchaseReturn), amountOf);
+const billedCost = list => sum(list.filter(isCost), amountOf) - sum(list.filter(isPurchaseReturn), amountOf);
+const netCost    = list => billedCost(list) + unbilled(list);
 const isCashIn  = tx => flowOf(tx) === "cash_in";
 const isCashOut = tx => flowOf(tx) === "cash_out" || flowOf(tx) === "cost_cash_out";
 const rawAmount = tx => num(tx.debit) + num(tx.credit);
@@ -1746,7 +1773,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.14.0";
+const APP_VERSION = "1.15.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -3038,7 +3065,8 @@ function viewReport(m, kind) {
   const entTbl = { customer:"customers", supplier:"suppliers", project:"projects",
                    employee:"employees", bank:"accounts", item:"items", asset:"assets" }[kind];
   if (entTbl) bar.appendChild(fld("Select | اختر",
-    `<select id="r_ent"><option value="">— all —</option>${rowsOf(entTbl).map(r =>
+    `<select id="r_ent"><option value="">— all —</option>${rowsOf(entTbl).slice()
+      .sort((a, b) => inOrder(a.nameEn, b.nameEn)).map(r =>
       `<option value="${esc(r.id)}" ${r.id === rep.entity ? "selected" : ""}>${esc(r.nameEn)}</option>`).join("")}</select>`));
 
   // Which questions this report can be narrowed by. Its own subject comes first.
