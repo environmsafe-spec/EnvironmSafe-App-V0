@@ -485,7 +485,7 @@ const SCHEMAS = {
 const T = {
   dashboard:["Dashboard","لوحة المعلومات"], daily:["Daily entry","الإدخال اليومي"],
   ledger:["Transactions","الحركات"], approvals:["Approvals","الاعتمادات"],
-  history:["History","السجل"],
+  history:["History","السجل"], rules:["Rules","القواعد"],
   cases:["Procurement files","ملفات المشتريات"],
   masters:["Master data","البيانات الأساسية"], reports:["Reports","التقارير"],
   data:["Backup & sync","النسخ والمزامنة"], users:["Users","المستخدمون"],
@@ -926,19 +926,94 @@ function lockPreview(upTo) {
   };
 }
 
-function missingFields(tx) {
-  const ty = typeOf(tx.type);
+/* Which entries a rule has anything to say about. Three scopes, because three
+   is what the work actually divides into: everything typed, everything that is
+   money, and money that moves through an account. */
+const RULE_SCOPES = {
+  all:   { label:"Every entry",                    test: () => true },
+  money: { label:"Entries that are money",         test: tx => !!typeOf(tx.type).fin },
+  cash:  { label:"Money moving through an account", test: tx => !!typeOf(tx.type).cash }
+};
+
+/* The rules themselves. Each one knows what it is looking for and how to say
+   what is missing; the office decides which entries it applies to and whether
+   a gap is worth refusing over. */
+const RULES = [
+  { k:"project",  name:"A job must be named",
+    says:"project",
+    missing: tx => !tx.projectId,
+    why:"Without it a project report quietly leaves entries out, which is worse than no project report.",
+    scope:"all",   level:"require" },
+  { k:"party",    name:"The party the entry is about must be named",
+    says: tx => typeOf(tx.type).party === "supplier" ? "supplier"
+              : typeOf(tx.type).party === "employee" ? "employee" : "customer",
+    missing: tx => { const y = typeOf(tx.type).party;
+      return (y === "customer" && !tx.customerId) || (y === "supplier" && !tx.supplierId)
+          || (y === "employee" && !tx.employeeId); },
+    why:"A salary filed against nobody is what made the employee report read zero.",
+    scope:"money", level:"require" },
+  { k:"anyParty", name:"Someone must be named — a customer, a supplier or an employee",
+    says:"customer, supplier or employee",
+    missing: tx => !tx.customerId && !tx.supplierId && !tx.employeeId,
+    why:"Money that names nobody can never be answered for afterwards.",
+    scope:"money", level:"warn" },
+  { k:"account",  name:"The bank or cash account must be named",
+    says:"bank or cash account",
+    missing: tx => !tx.accountId,
+    why:"Otherwise no account statement can be reconciled against the bank.",
+    scope:"cash",  level:"require" },
+  { k:"amount",   name:"The amount must be more than nothing",
+    says:"amount",
+    missing: tx => !(rawAmount(tx) > 0),
+    why:"An entry worth nothing is a note, not a figure.",
+    scope:"money", level:"require" },
+  { k:"reference", name:"A document or reference number must be given",
+    says:"reference number",
+    missing: tx => !String(tx.refNo || "").trim(),
+    why:"Ties each figure to the paper it came from.",
+    scope:"money", level:"off" },
+  { k:"category", name:"An expense category must be chosen",
+    says:"expense category",
+    missing: tx => !tx.categoryId,
+    why:"Only worth turning on once the categories are ones the office actually uses.",
+    scope:"money", level:"off" }
+];
+const ruleBy = k => RULES.find(r => r.k === k);
+
+/** A rule as the office has set it, or as it was shipped. */
+function ruleSet(k) {
+  const base = ruleBy(k) || {};
+  const saved = ((CO().rules || {})[k]) || {};
+  const scope = RULE_SCOPES[saved.scope] ? saved.scope : base.scope;
+  const level = ["off", "warn", "require"].includes(saved.level) ? saved.level : base.level;
+  return { scope, level };
+}
+
+/** What this entry is short of, at the given strength. */
+function rulesBroken(tx, level) {
   const out = [];
-  if (!ty.fin) return out;                       // a quotation is not money yet
-  if (ty.party === "customer" && !tx.customerId) out.push("customer");
-  if (ty.party === "supplier" && !tx.supplierId) out.push("supplier");
-  if (ty.party === "employee" && !tx.employeeId) out.push("employee");
-  if (ty.cash && !tx.accountId)                  out.push("bank or cash account");
-  // Every figure in this business belongs to a job; a project report that
-  // quietly leaves entries out is worse than no project report.
-  if (!tx.projectId)                             out.push("project");
+  RULES.forEach(r => {
+    const s = ruleSet(r.k);
+    if (s.level !== level) return;
+    if (!RULE_SCOPES[s.scope].test(tx)) return;
+    if (!r.missing(tx)) return;
+    out.push(typeof r.says === "function" ? r.says(tx) : r.says);
+  });
   return out;
 }
+
+/** What must be filled in before this entry can join the books. */
+const missingFields = tx => rulesBroken(tx, "require");
+/** What is worth mentioning but not worth refusing over. */
+const weakFields    = tx => rulesBroken(tx, "warn");
+
+/** How many entries in the books break a rule as it is set today. */
+const ruleBreaches = k => {
+  const s = ruleSet(k), r = ruleBy(k);
+  if (!r || s.level === "off") return 0;
+  return DB.transactions.filter(x =>
+    live(x) && RULE_SCOPES[s.scope].test(x) && r.missing(x)).length;
+};
 const isIncomplete = tx => missingFields(tx).length > 0;
 const saysMissing  = list =>
   list.length === 1 ? `no ${list[0]}`
@@ -1232,7 +1307,8 @@ const NAV = [
     { id:"r_employee", label:"r_employee" }, { id:"r_bank", label:"r_bank" },
     { id:"r_item", label:"r_item" }, { id:"r_asset", label:"r_asset" },
     { id:"r_document", label:"r_document" } ] },
-  { group:"System", items:[ { id:"history", label:"history" },
+  { group:"System", items:[ { id:"rules", label:"rules", admin:true },
+    { id:"history", label:"history" },
     { id:"m_users", label:"users", admin:true },
     { id:"company", label:"company", admin:true }, { id:"data", label:"data" } ] }
 ];
@@ -1288,6 +1364,7 @@ function render() {
   else if (VIEW === "ledger") viewLedger(m);
   else if (VIEW === "approvals") viewApprovals(m);
   else if (VIEW === "history") viewHistory(m);
+  else if (VIEW === "rules") viewRules(m);
   else if (VIEW === "cases") viewCases(m);
   else if (VIEW.startsWith("m_")) viewMaster(m, VIEW.slice(2));
   else if (VIEW.startsWith("r_")) viewReport(m, VIEW.slice(2));
@@ -1655,8 +1732,10 @@ function viewDaily(m) {
     const asset = f.isAsset === "Yes" ? registerAssetFrom(tx, f) : null;
     save();
     entryDraft = { date:f.date, type:f.type, caseNo:f.caseNo, status:"Draft" };
+    const soft = weakFields(tx);
     toast((asset ? `Saved ${tx.id} · asset ${asset.id} added to the register` : `Saved ${tx.id}`)
-      + (short.length ? ` · ${saysMissing(short)} yet — it cannot be approved until there is` : ""));
+      + (short.length ? ` · ${saysMissing(short)} yet — it cannot be approved until there is` : "")
+      + (soft.length ? ` · ${saysMissing(soft)}` : ""));
     render();
   };
 
@@ -1777,7 +1856,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.16.0";
+const APP_VERSION = "1.17.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -2213,6 +2292,80 @@ function exportHistoryCsv() {
       lines.push(base.concat([c.f, c.from, c.to]).map(csvCell).join(",")));
   });
   saveFile(`environmsafe-history-${today()}.csv`, cols.join(",") + "\n" + lines.join("\n"), "text/csv");
+}
+
+/* The rules screen.
+
+   These were decided in the code until now, which meant every change to how
+   this office works was a change somebody else had to make. They are settings.
+   Each rule says plainly what it looks for and why it is worth having, and —
+   the part that matters — how many entries already in the books would break it
+   as it is set, so turning one on is a decision taken with the number in front
+   of you rather than a surprise the following morning. */
+function viewRules(m) {
+  pageHead(m, "Rules", "What an entry must say before it counts");
+  if (!isAdmin()) {
+    m.appendChild(el("div", { class:"card" },
+      `<div class="empty">Only an Administrator can change the rules.</div>`));
+    return;
+  }
+
+  const card = el("div", { class:"card" });
+  card.appendChild(el("p", { class:"card-note" },
+    "<b>Refuse</b> holds the entry out of the books until it is filled in — it can still be " +
+    "typed and saved, it simply cannot be approved. <b>Mention</b> says so when the entry is " +
+    "saved and lets it through. <b>Off</b> asks nothing."));
+
+  const form = el("form");
+  const rows = RULES.map(r => {
+    const s = ruleSet(r.k);
+    const n = ruleBreaches(r.k);
+    return `<tr>
+      <td><b>${esc(r.name)}</b><br><small class="card-note">${esc(r.why)}</small></td>
+      <td><select name="scope_${esc(r.k)}">${Object.keys(RULE_SCOPES).map(k =>
+        `<option value="${k}" ${s.scope === k ? "selected" : ""}>${esc(RULE_SCOPES[k].label)}</option>`
+      ).join("")}</select></td>
+      <td><select name="level_${esc(r.k)}">
+        <option value="off" ${s.level === "off" ? "selected" : ""}>Off</option>
+        <option value="warn" ${s.level === "warn" ? "selected" : ""}>Mention</option>
+        <option value="require" ${s.level === "require" ? "selected" : ""}>Refuse</option>
+      </select></td>
+      <td class="num">${n ? `<b>${n}</b>` : "—"}</td></tr>`;
+  }).join("");
+
+  const w = el("div", { class:"tablewrap" });
+  w.innerHTML = `<table><thead><tr>
+    <th>Rule</th><th>Applies to</th><th>When it is missing</th>
+    <th class="num">Entries that break it today</th></tr></thead><tbody>${rows}</tbody></table>`;
+  form.appendChild(w);
+
+  const bar = el("div", { style:"margin-top:.9rem;display:flex;gap:.5rem;flex-wrap:wrap" });
+  const save_ = el("button", { class:"btn gold", type:"submit" }, t("save"));
+  bar.appendChild(save_);
+  form.appendChild(bar);
+
+  form.onsubmit = e => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(form).entries());
+    const next = {};
+    RULES.forEach(r => next[r.k] = { scope:f["scope_" + r.k], level:f["level_" + r.k] });
+    const wasCo = Object.assign({}, CO());
+    DB.meta.company = Object.assign({}, DB.meta.company, { rules: next });
+    noteChange("setting", "company", { id:"RULES" },
+               fieldsChanged({ rules: wasCo.rules || {} }, { rules: next }), "Entry rules");
+    save(); render(); toast("Rules saved");
+  };
+  card.appendChild(form);
+  m.appendChild(card);
+
+  /* Turning a rule to Refuse can strand entries that are already waiting, so
+     what that would cost is said before it is chosen, not after. */
+  const stuck = pendingTxs().filter(isIncomplete).length;
+  if (stuck)
+    m.appendChild(el("div", { class:"card" }, `<div class="card-note">
+      ${stuck} ${stuck === 1 ? "entry is" : "entries are"} waiting for approval and cannot be
+      approved as the rules stand. The transactions screen lists them under
+      <b>Show → Only incomplete</b>.</div>`));
 }
 
 function viewApprovals(m) {

@@ -33,8 +33,21 @@ module.exports = { name: 'entries a report can read', run: async (ctx) => {
   check('an invoice with no job is missing its project',
         (await miss('TRX-NOJOB')).join() === 'project', (await miss('TRX-NOJOB')).join());
   check('a complete entry is missing nothing', (await miss('TRX-OK')).length === 0);
-  check('a quotation is not money, so nothing is demanded of it',
+  /* A job is asked of every entry, money or not — the office's rule, and one
+     it can narrow to money alone on the Rules screen. What is asked only of
+     money is not asked of a quotation. */
+  check('a job is asked even of a quotation',
+        (await miss('TRX-QUOTE')).join() === 'project', (await miss('TRX-QUOTE')).join());
+  await pg.evaluate(() => {
+    DB.meta.company = Object.assign({}, DB.meta.company,
+      { rules: { project: { scope:'money', level:'require' } } });
+    save();
+  });
+  check('and narrowing that rule to money leaves the quotation alone',
         (await miss('TRX-QUOTE')).length === 0, (await miss('TRX-QUOTE')).join());
+  await pg.evaluate(() => {
+    DB.meta.company = Object.assign({}, DB.meta.company, { rules: {} }); save();
+  });
 
   // The gate is approval, never the typing.
   check('an incomplete entry cannot be approved',
@@ -71,7 +84,7 @@ module.exports = { name: 'entries a report can read', run: async (ctx) => {
   const shown = await pg.evaluate(() =>
     [...document.querySelectorAll('#main tbody tr')].map(r => r.children[0].textContent.trim()).sort().join(','));
   check('the transactions screen can list only what is incomplete',
-        shown === 'TRX-NOBODY,TRX-NOJOB', shown);
+        shown === 'TRX-NOBODY,TRX-NOJOB,TRX-QUOTE', shown);
 
   check('no page errors', pg.errors.length === 0, pg.errors.slice(0,2).join(' | '));
   await pg.ctx.close();
