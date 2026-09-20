@@ -106,6 +106,26 @@ async function run(ctx) {
   check('the placeholder never reaches a saved record',
         saved && saved.supplierId === '' && saved.amount === 777, JSON.stringify(saved));
 
+  /* Lists people pick from read in order, and the numbers inside them count:
+     "Go Green-2" belongs before "Go Green-10", which plain text sorting gets
+     backwards. */
+  await pg.evaluate(() => {
+    ['Go Green-10 Bellows', 'Go Green-2 Filters', 'adra-maint-001', 'ADRA-Lift-002']
+      .forEach(n => DB.projects.push({ uid:newUid(), id:nextId('PRJ'), nameEn:n, status:'active' }));
+    save(); render();
+  });
+  const listed = await pg.evaluate(() => {
+    const sel = document.querySelector('select[data-reftable="projects"]');
+    return [...sel.options].map(o => o.textContent).filter(x => /Go Green-|adra/i.test(x));
+  });
+  const sorted = listed.slice().sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric:true, sensitivity:'base' }));
+  check('the list is in order, counting the numbers inside the names',
+        listed.join('|') === sorted.join('|'), listed.join(' , '));
+  check('and "-2" comes before "-10"',
+        listed.indexOf('Go Green-2 Filters') < listed.indexOf('Go Green-10 Bellows'),
+        listed.join(' , '));
+
   check('no page errors', pg.errors.length === 0, pg.errors.join(' | '));
   await pg.ctx.close();
 }

@@ -612,6 +612,13 @@ const today = () => new Date().toISOString().slice(0,10);
 const monthOf = d => (d || "").slice(0,7);
 const rowsOf = tbl => DB[tbl] || [];
 const byId = (tbl, id) => rowsOf(tbl).find(r => r.id === id);
+/* Lists people pick from read in order. Plain text sorting puts "Go Green-10"
+   before "Go Green-2" because it compares the "1" against the "2" and stops;
+   comparing the numbers inside as numbers is what "smallest to largest" means
+   to the office. Case and accents are ignored so ADRA and Adra sit together. */
+const inOrder = (a, b) =>
+  String(a == null ? "" : a).localeCompare(String(b == null ? "" : b),
+                                           undefined, { numeric:true, sensitivity:"base" });
 const nameOf = (tbl, id) => { const r = byId(tbl, id); return r ? (LANG === "ar" && r.nameAr ? r.nameAr : r.nameEn) : ""; };
 
 /* ---------- sign-in ---------- */
@@ -1462,7 +1469,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.9.4";
+const APP_VERSION = "1.9.5";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -1484,8 +1491,10 @@ function refOptions(tbl, val, labelKey) {
   return `<option value=""></option>` +
     (canEdit() && SCHEMAS[tbl] && tbl !== "users"
       ? `<option value="${ADD_NEW}">+ ${esc(t("add"))} ${esc(REF_NOUN[tbl] || "record")}…</option>` : "") +
-    rowsOf(tbl).map(r =>
-      `<option value="${esc(r.id)}" ${r.id === val ? "selected" : ""}>${esc(label(r))}</option>`).join("");
+    rowsOf(tbl).slice()
+      .sort((x, y) => inOrder(label(x), label(y)))
+      .map(r =>
+        `<option value="${esc(r.id)}" ${r.id === val ? "selected" : ""}>${esc(label(r))}</option>`).join("");
 }
 
 function refSelect(name, tbl, val, labelKey) {
@@ -2019,7 +2028,8 @@ function selOk(x) {
 function selOptions(k) {
   const d = SEL_DIMS[k];
   if (d.values) return d.values().map(v => ({ v, label:v }));
-  return rowsOf(d.table).map(r => ({ v:r.id, label:r.nameEn || r.id }));
+  return rowsOf(d.table).map(r => ({ v:r.id, label:r.nameEn || r.id }))
+    .sort((x, y) => inOrder(x.label, y.label));
 }
 
 /** What the button says, and what a printed report needs to admit it is showing. */
