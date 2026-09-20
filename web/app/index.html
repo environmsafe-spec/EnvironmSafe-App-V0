@@ -1985,7 +1985,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.18.0";
+const APP_VERSION = "1.19.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -4836,6 +4836,18 @@ async function syncPull() {
     offset += batch.length;
   }
   let applied = 0, newest = SYNC.lastPull || "";
+  /* What each table already says, word for word, so the same record arriving
+     under a second uid is recognised without re-reading the whole table for
+     every row that comes down. Built once per table, kept in step below. */
+  const said = Object.create(null);
+  const saidIn = tbl => {
+    if (!said[tbl]) {
+      const m = new Map();
+      (DB[tbl] || []).forEach(x => { if (x) m.set(bodyOf(x), x); });
+      said[tbl] = m;
+    }
+    return said[tbl];
+  };
   (rows || []).forEach(row => {
     if (!row.updated_at) return;
     if (row.updated_at > newest) newest = row.updated_at;
@@ -4852,12 +4864,22 @@ async function syncPull() {
     const idx = list.findIndex(x => x && x.uid === row.record_id);
 
     if (row.deleted) {
-      if (idx >= 0) { list.splice(idx, 1); applied++; }
+      if (idx >= 0) { saidIn(row.collection).delete(bodyOf(list[idx])); list.splice(idx, 1); applied++; }
       delete SYNC.synced[k];
       return;
     }
-    if (idx < 0) { list.push(row.data); applied++; }
-    else if (hashOf(list[idx]) !== hashOf(row.data)) { list[idx] = row.data; applied++; }
+    const body = bodyOf(row.data);
+    if (idx < 0) {
+      /* The same record, pushed twice under two uids, is still one record. The
+         device keeps the one it already has and leaves the other where it is. */
+      // Its own record, if it had one here, was found by uid above.
+      if (saidIn(row.collection).get(body)) { SYNC.synced[k] = hashOf(row.data); return; }
+      list.push(row.data); saidIn(row.collection).set(body, row.data); applied++;
+    }
+    else if (hashOf(list[idx]) !== hashOf(row.data)) {
+      saidIn(row.collection).delete(bodyOf(list[idx]));
+      list[idx] = row.data; saidIn(row.collection).set(body, row.data); applied++;
+    }
     SYNC.synced[k] = hashOf(row.data);
   });
   if (newest) SYNC.lastPull = newest;
@@ -5545,13 +5567,43 @@ function fxCard(m) {
   m.appendChild(c);
 }
 
+/* What a record says about itself, under the number it answers to, leaving out
+   who it is. Two records with the same document number saying word for word the
+   same thing — same date, same amount, same party, same note, created in the
+   same millisecond — are one record that arrived twice. Nobody types that
+   twice, and two records genuinely entered apart are given different numbers,
+   so this cannot fold two real entries into one. */
+function bodyOf(r) {
+  const out = {};
+  Object.keys(r).sort().forEach(k => {
+    if (k === "uid" || k === "updatedAt" || k === "starter") return;
+    out[k] = r[k];
+  });
+  return JSON.stringify(out);
+}
+
 function mergeDb(incoming) {
   let n = 0;
   const tables = ["users","items","assets","customers","suppliers","employees","projects","accounts","categories","transactions"];
   tables.forEach(tbl => {
+    const list = DB[tbl] || [];
+    /* Books imported twice before they had uids arrive as strangers: each
+       import minted its own, so nothing matched and every amount was counted a
+       second time. It happened here — 41 transactions, pushed twice, twelve
+       minutes apart. So a record matching nothing is checked against what the
+       books already say before it is taken as new. Built only when something
+       fails to match, and kept in step after. */
+    let bodies = null;
+    const arrivedBefore = r => {
+      if (!bodies) {
+        bodies = new Map();
+        list.forEach(x => { const k = bodyOf(x); if (!bodies.has(k)) bodies.set(k, x); });
+      }
+      // Its own record, if it had one here, was found by uid above.
+      return bodies.get(bodyOf(r)) || null;
+    };
     (incoming[tbl] || []).forEach(r => {
       if (!r || !r.id) return;
-      const list = DB[tbl] || [];
       // Match on uid when the incoming record has one, falling back to the number
       // for records written before uids existed. A uid is never invented for an
       // incoming record before matching: doing so made the same old backup import
@@ -5560,8 +5612,10 @@ function mergeDb(incoming) {
         ? (list.find(x => x.uid === r.uid) || list.find(x => !x.uid && x.id === r.id))
         : list.find(x => x.id === r.id);
       if (!mine) {
+        if (arrivedBefore(r)) return;               // already in the books, under another uid
         if (!r.uid) r.uid = newUid();
         list.push(r); n++;
+        if (bodies) bodies.set(bodyOf(r), r);
       } else if ((r.updatedAt || "") > (mine.updatedAt || "")) {
         const keep = mine.uid || r.uid || newUid();   // identity, once settled, never changes
         Object.assign(mine, r);
@@ -5572,7 +5626,7 @@ function mergeDb(incoming) {
       }
     });
     // keep the ID counter ahead of anything that arrived
-    (DB[tbl] || []).forEach(r => {
+    list.forEach(r => {
       const mm = /^([A-Z]+)-(?:[A-Z0-9]{1,4}-)?(\d+)$/.exec(r.id || "");
       if (mm) DB.meta.seq[mm[1]] = Math.max(DB.meta.seq[mm[1]] || 0, parseInt(mm[2],10));
     });

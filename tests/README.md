@@ -22,12 +22,14 @@ npm test -- sync     # only suites whose name contains "sync"
 | `drive backup` | The copy the company owns outright going stale or absent: a folder made afresh every day, old copies never cleared, a token Google has refused being reused, and being offline looking like a failure of the books |
 | `columns` | A statement's optional columns not adding, removing or reordering; a choice not surviving a reload or leaking into a different report; Print and Excel drifting from what is actually on screen; the pinned date/balance ends being reorderable away |
 | `columns (items & assets)` | The same, extended to the Item/service report and Asset register — a flat register with totals that are not contiguous with any fixed trailing block, so a footer sum landing under the wrong column once columns move |
+| `numbering` | One document number answering to two records. Sixty-two of them did, because each device counted on its own from a two-character tag. The company's counter now hands out blocks; these checks hold that two devices never overlap, a reload never reissues, a block is never spent past its end, and a counter that refuses never stops entry |
+| `duplicates — the same record twice` | The books counting an amount twice. Forty-one transactions were entered once and stored twice, because the same books were imported on two occasions before they carried uids and each import minted its own. Also that the guard stays narrow: a figure that differs at all, or the same figures under their own number, are still two records |
 | `report entity does not leak` | A specific customer, asset, project or account chosen on one report silently filtering an unrelated one down to nothing — found while testing this feature, not something it introduced, but exactly the kind of thing this suite exists to catch |
 
 ## The stand-in server
 
 `mock-supabase.js` implements exactly the requests the app makes — sign-in, token
-refresh, sign-up, membership, and `es_records`. It is not an emulator. It exists so
+refresh, sign-up, membership, `es_records` and the document-number counter. It is not an emulator. It exists so
 the suite runs anywhere, offline, and can stage what a real server will not stage on
 demand: an expired token, a refused refresh, a sign-up awaiting email confirmation.
 
