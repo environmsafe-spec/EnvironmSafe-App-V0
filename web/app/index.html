@@ -533,6 +533,16 @@ function load() {
   return d;
 }
 function save() {
+  /* A record with no uid has no identity yet, and identity is what tells two
+     copies of these books apart. Sixty-two entries were typed once and stored
+     twice because they were written to disk anonymous: a second copy of the
+     books was taken before the identities were handed out, and each copy then
+     named them differently. Both names were valid, so syncing — correctly, by
+     its own rules — kept both records.
+
+     The window between "saved" and "named" is now zero. Every creation site
+     also sets its own uid; this is the guarantee that none can forget. */
+  ensureUids();
   try { localStorage.setItem(DB_KEY, JSON.stringify(DB)); }
   catch (e) { toast("Storage is full — export a backup and remove old attachments."); }
   scheduleSync();
@@ -545,8 +555,8 @@ function save() {
 function seed(d) {
   const now = new Date().toISOString();
   const mk = (tbl, prefix, rows) => rows.forEach((r,i) => {
-    d[tbl].push(Object.assign({ id:`${prefix}-${String(i+1).padStart(4,"0")}`, createdAt:now, updatedAt:now,
-                                starter:true }, r));
+    d[tbl].push(Object.assign({ id:`${prefix}-${String(i+1).padStart(4,"0")}`, uid:newUid(),
+                                createdAt:now, updatedAt:now, starter:true }, r));
     d.meta.seq[prefix] = i+1;
   });
   mk("accounts","ACC",[
@@ -830,7 +840,7 @@ async function ensureAdmin() {
   if (rowsOf("users").length) return;
   const now = new Date().toISOString();
   const admin = {
-    id:nextId("USR"), nameEn:"Administrator", username:DEFAULT_ADMIN.username,
+    id:nextId("USR"), uid:newUid(), nameEn:"Administrator", username:DEFAULT_ADMIN.username,
     role:"Administrator", active:"Yes", mustChange:"Yes", createdAt:now, updatedAt:now
   };
   await setPassword(admin, DEFAULT_ADMIN.password);
@@ -1908,7 +1918,8 @@ function viewDaily(m) {
     if (warn && !confirm(warn)) return;
     const now = new Date().toISOString();
     const tx = {
-      id: nextId("TRX"), date:f.date, type:f.type, phase:f.phase, caseNo:f.caseNo.trim(),
+      id: nextId("TRX"), uid: newUid(),
+      date:f.date, type:f.type, phase:f.phase, caseNo:f.caseNo.trim(),
       customerId:f.customerId, supplierId:f.supplierId, employeeId:f.employeeId,
       projectId:f.projectId, accountId:f.accountId, categoryId:f.categoryId,
       itemId:f.itemId, qty:num(f.qty), unitPrice:num(f.unitPrice), discount:num(f.discount), isAsset:f.isAsset,
@@ -2010,7 +2021,7 @@ function registerAssetFrom(tx, f) {
   const it = byId("items", tx.itemId);
   const now = new Date().toISOString();
   const asset = {
-    id: nextId("AST"),
+    id: nextId("AST"), uid: newUid(),
     tag: (f.assetTag || "").trim(),
     nameEn: it ? it.nameEn : (f.notes || "Asset from " + tx.id),
     nameAr: it ? it.nameAr || "" : "",
@@ -2054,7 +2065,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.20.0";
+const APP_VERSION = "1.21.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -2852,7 +2863,8 @@ function editMaster(tbl, id, onDone) {
     const before = rec ? JSON.parse(JSON.stringify(rec)) : null;
     if (rec) { Object.assign(rec, vals, { updatedAt:now }); }
     else {
-      const row = Object.assign({ id:nextId(S.prefix), createdAt:now, updatedAt:now }, vals);
+      const row = Object.assign({ id:nextId(S.prefix), uid:newUid(),
+                                 createdAt:now, updatedAt:now }, vals);
       if (tbl === "users") {
         row.active = row.active || "Yes";
         // the administrator knows this password, so the user picks their own on first sign-in
@@ -2923,7 +2935,8 @@ function importMasterCsv(tbl) {
         rows.slice(1).forEach(r => {
           const rec = {}; map.forEach((k,i) => { if (k) rec[k] = (r[i] || "").trim(); });
           if (!rec.nameEn) return;
-          DB[tbl].push(Object.assign({ id:nextId(S.prefix), createdAt:now, updatedAt:now }, rec)); n++;
+          DB[tbl].push(Object.assign({ id:nextId(S.prefix), uid:newUid(),
+                                       createdAt:now, updatedAt:now }, rec)); n++;
         });
         save(); render(); toast(`Imported ${n} records`);
       } catch (e) { toast("Could not read that CSV file."); }

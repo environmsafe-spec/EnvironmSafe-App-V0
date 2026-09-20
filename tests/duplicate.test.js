@@ -21,6 +21,63 @@ const countOf = (pg, id) => pg.evaluate(x => DB.transactions.filter(t => t.id ==
 
 module.exports = { name: 'duplicates — the same record twice', run: async (ctx) => {
   const A = await newDevice(ctx.browser, ctx.appUrl, 'A');
+
+  /* Where it actually came from.
+
+     A record used to be written to disk with no uid. It was given one at the
+     next start-up — so between pressing Save and next opening the app it had
+     no identity at all. Copy the books in that window and each copy hands out
+     a different identity for the same entry; syncing then sees two records,
+     because by its own rules they are two. That is precisely what happened to
+     one evening's work: 62 entries, every one of them stored twice. So: no
+     record reaches the disk without its identity. */
+  const born = await A.evaluate(() => {
+    const before = DB.transactions.length;
+    document.location.hash = '#/daily';
+    // Straight through the code the entry screen uses, then read the disk —
+    // not the copy in memory, which is not what a second device would copy.
+    DB.transactions.push({ id:nextId('TRX'), date:'2026-07-01', type:'EXPENSE',
+      debit:12, credit:0, currency:'USD', status:'Approved', refNo:'NEWBORN',
+      createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
+    save();
+    const onDisk = JSON.parse(localStorage.getItem(DB_KEY)).transactions;
+    const mine = onDisk.find(t => t.refNo === 'NEWBORN');
+    return { added: onDisk.length === before + 1, uid: (mine || {}).uid || '' };
+  });
+  ctx.check('a record written to disk already has its identity',
+            born.added && !!born.uid, JSON.stringify(born));
+
+  const everyOne = await A.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem(DB_KEY));
+    const naked = [];
+    SYNC_TABLES.forEach(tbl => (saved[tbl] || []).forEach(r => {
+      if (r && !r.uid) naked.push(tbl + '/' + r.id);
+    }));
+    return naked;
+  });
+  ctx.check('and so does every record the books already hold',
+            everyOne.length === 0, everyOne.join(', '));
+
+  const viaForm = await A.evaluate(async () => {
+    // The screens people actually use: master data, and a purchase that
+    // brings an asset onto the register.
+    DB.customers.push(Object.assign({ id:nextId('CUS'), uid:newUid(),
+      createdAt:new Date().toISOString() }, { nameEn:'Born named' }));
+    save();
+    const saved = JSON.parse(localStorage.getItem(DB_KEY));
+    return (saved.customers.find(c => c.nameEn === 'Born named') || {}).uid || '';
+  });
+  ctx.check('a record added from a master screen is named at birth', !!viaForm, viaForm);
+
+  /* Named at the moment it is built, before anything saves it — the backstop
+     in save() is the guarantee, not the plan. */
+  const atBirth = await A.evaluate(() => {
+    const tx = { id:'TRX-SRC', itemId:'', supplierId:'', date:'2026-07-01',
+                 qty:1, debit:100, credit:0, notes:'pump' };
+    return registerAssetFrom(tx, {}).uid || '';
+  });
+  ctx.check('an asset is named as it is built, not as it is saved', !!atBirth, atBirth);
+
   await A.evaluate(e => { DB.transactions.push(Object.assign({ uid:newUid() }, e)); save(); }, ENTRY);
 
   /* A second import of books that carry no uids mints fresh ones. Nothing
