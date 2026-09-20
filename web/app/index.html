@@ -841,6 +841,60 @@ const auditOf = (table, recId) => (DB.audit || [])
    but nothing joins the books until it can be read.
    ========================================================================= */
 
+/* =========================================================================
+   Closing a period.
+
+   Once figures have been reported to anyone — an owner, a bank, a tax office —
+   they must stop moving. Without that, last quarter's profit is whatever today
+   happens to compute, and nobody can say which version was the one they were
+   shown. A closed period is the ordinary answer: on or before a chosen day the
+   books are read-only, and it takes an Administrator, deliberately, to open
+   them again.
+
+   The day is chosen, not calculated, but the system refuses to close over work
+   that is not finished: entries still waiting for approval inside the period
+   would be sealed unapproved and could never join the books at all.
+   ========================================================================= */
+
+const lockedUpTo = () => (CO().lockedUpTo || "").slice(0, 10);
+const isLocked   = d => { const l = lockedUpTo(); return !!l && !!d && String(d) <= l; };
+
+/** Why this entry cannot be touched, or "" when it can. */
+function lockProblem(tx, newDate) {
+  const l = lockedUpTo();
+  if (!l) return "";
+  if (isLocked(tx && tx.date))
+    return `${(tx && tx.id) || "That entry"} is dated on or before ${l}, and the books are closed ` +
+           `to that day. An Administrator can move the closing date back under Company.`;
+  if (newDate && isLocked(newDate))
+    return `The books are closed to ${l}, so an entry cannot be dated ${newDate}.`;
+  return "";
+}
+
+/** The latest day that could be closed without sealing unfinished work. */
+function safeLockDate() {
+  const open = DB.transactions.filter(x => live(x) && x.status === PENDING && typeOf(x.type).fin)
+    .map(x => x.date).filter(Boolean).sort();
+  if (!open.length) {
+    const all = DB.transactions.filter(live).map(x => x.date).filter(Boolean).sort();
+    return all.length ? all[all.length - 1] : "";
+  }
+  // The day before the earliest entry still waiting.
+  const d = new Date(open[0] + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/** What closing to this day would seal: how much, and anything unfinished. */
+function lockPreview(upTo) {
+  const inRangeRows = DB.transactions.filter(x => live(x) && x.date && x.date <= upTo);
+  return {
+    rows: inRangeRows.length,
+    waiting: inRangeRows.filter(x => x.status === PENDING && typeOf(x.type).fin).length,
+    incomplete: inRangeRows.filter(isIncomplete).length
+  };
+}
+
 function missingFields(tx) {
   const ty = typeOf(tx.type);
   const out = [];
@@ -1540,6 +1594,7 @@ function viewDaily(m) {
     const amount = num(f.amount);
     if (ty.fin && amount <= 0) return toast("Enter an amount greater than zero.");
     if (ty.cash && !f.accountId) return toast("Select the bank or cash account used.");
+    if (isLocked(f.date)) return toast(lockProblem(null, f.date));
     if (f.isAsset === "Yes" && !isPurchase(f.type))
       return toast("Only a purchase (supplier bill, expense or payment out) can create an asset.");
     const warn = duplicateTxWarning({ date:f.date, type:f.type, amount, refNo:f.refNo,
@@ -1691,7 +1746,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.13.0";
+const APP_VERSION = "1.14.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -1801,7 +1856,9 @@ function txTable(list, opts = {}) {
       if (b.dataset.act === "apply") return applyToDocs(tx);
       if (b.dataset.act === "del") {
         if (!canEdit()) return toast("Your role is read-only.");
-        if (confirm(`Delete ${tx.id}?`)) {
+        const shutDel = lockProblem(tx);
+    if (shutDel) return toast(shutDel);
+    if (confirm(`Delete ${tx.id}?`)) {
           noteChange("delete", "transactions", tx,
             fieldsChanged(tx, null), `${tx.type} ${fmt(rawAmount(tx))} ${txCurrency(tx)}`);
           DB.transactions = DB.transactions.filter(x => x.id !== tx.id); save(); render();
@@ -1862,6 +1919,8 @@ function editTx(tx) {
     if (!canEdit()) return toast("Your role is read-only.");
     if (f.status === "Approved" && was.status === "Draft" && !canApprove())
       return toast("Only a Reviewer can approve.");
+    const shut = lockProblem(tx, f.date);
+    if (shut) return toast(shut);
 
     const ty = typeOf(f.type);
     const amount = num(f.amount);
@@ -1993,6 +2052,8 @@ function ledgerSearch(list, q) {
    question an approval exists to answer. */
 /** Refuses with what is missing, or "" when the entry can be read. */
 function approvalBlocked(tx) {
+  const shut = lockProblem(tx);
+  if (shut) return shut;
   const miss = missingFields(tx);
   return miss.length ? `${tx.id} has ${saysMissing(miss)} — a report could not answer about it.` : "";
 }
@@ -2799,6 +2860,10 @@ function applyToDocs(tx, onDone) {
   const save_ = el("button", { class:"btn gold", type:"button" }, t("save"));
   save_.onclick = () => {
     if (!canEdit()) return toast("Your role is read-only.");
+    // Judged by the payment's own day. Money received in July settling a June
+    // invoice is ordinary business, not a change to June.
+    const shut = lockProblem(tx);
+    if (shut) return toast(shut);
     const rows = [];
     boxes.forEach((inp, uid) => { const a = round2(inp.value); if (a > 0) rows.push({ uid, amount:a }); });
     const bad = allocationProblem(tx, rows);
@@ -4084,6 +4149,22 @@ function viewCompany(m) {
          ${waiting} ${waiting === 1 ? "entry" : "entries"} already typed — they stop counting
          until approved. They will be waiting for you on the Approvals screen.</div>`
       : "")));
+  /* Closing a period is the one setting that can seal work unfinished, so the
+     screen does the arithmetic: the furthest safe day, and what today's choice
+     would catch. */
+  const shutTo = lockedUpTo();
+  const safe = safeLockDate();
+  const pv = shutTo ? null : lockPreview(safe);
+  g.appendChild(fld("Books closed up to and including",
+    `<input type="date" name="lockedUpTo" value="${esc(shutTo)}">` +
+    (shutTo
+      ? `<div class="card-note">Nothing dated on or before ${esc(shutTo)} can be added,
+           changed, deleted or approved. Clearing this date opens those books again,
+           and that is recorded.</div>`
+      : `<div class="card-note">Empty means nothing is closed. The furthest you could
+           close today is <b>${esc(safe)}</b> — that seals ${pv ? pv.rows : 0}
+           ${pv && pv.rows === 1 ? "entry" : "entries"} and leaves everything still
+           waiting for approval open.</div>`)));
   form.appendChild(g);
   CO_TEXTAREAS.forEach(f => form.appendChild(fld(f.l,
     `<textarea name="${f.k}" rows="3">${esc(c[f.k] || "")}</textarea>`)));
@@ -4118,6 +4199,22 @@ function viewCompany(m) {
     /* Whether entries must be approved decides what the whole book counts, so
        it is recorded like any other change to the money. */
     const wasCo = Object.assign({}, CO());
+    /* Sealing entries that are still waiting would strand them: they could
+       never be approved, so they could never join the books at all. */
+    const shutTo2 = (vals.lockedUpTo || "").slice(0, 10);
+    if (shutTo2 && shutTo2 !== (wasCo.lockedUpTo || "").slice(0, 10)) {
+      const pv2 = lockPreview(shutTo2);
+      if (pv2.waiting)
+        return toast(`${pv2.waiting} ${pv2.waiting === 1 ? "entry is" : "entries are"} still ` +
+                     `waiting for approval on or before ${shutTo2}. Approve them first, or close ` +
+                     `to ${safeLockDate()} instead.`);
+      if (!confirm(`Close the books up to and including ${shutTo2}?\n\n` +
+                   `${pv2.rows} ${pv2.rows === 1 ? "entry" : "entries"} can no longer be added, ` +
+                   `changed, deleted or approved` +
+                   (pv2.incomplete ? `, including ${pv2.incomplete} that ${
+                     pv2.incomplete === 1 ? "is" : "are"} incomplete and will stay that way` : "") +
+                   `.\n\nAn Administrator can open them again.`)) return;
+    }
     DB.meta.company = Object.assign({}, DB.meta.company, vals);
     noteChange("setting", "company", { id:"COMPANY" },
                fieldsChanged(wasCo, CO()).filter(c => c.f !== "logo"), "Company profile");
