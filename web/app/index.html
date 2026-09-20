@@ -590,11 +590,14 @@ function newUid() {
   return "u-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,10);
 }
 
-/** Two or three stable characters identifying this device, from its own id. */
+/* A few stable characters identifying this device, from its own id. Four, not
+   two: two characters gave only 1,296 possible tags, and two devices that drew
+   the same one both counted from 1 and stamped the same numbers on different
+   records. */
 function deviceTag() {
   const d = String((DB.meta && DB.meta.device) || "");
   const m = /([a-z0-9]{2,})$/i.exec(d);
-  return m ? m[1].slice(-2).toUpperCase() : "";
+  return m ? m[1].slice(-4).toUpperCase() : "";
 }
 
 /** Older records predate uid; give them one the first time they are seen. */
@@ -606,11 +609,137 @@ function ensureUids() {
   return added;
 }
 
+/* Document numbers.
+   A device counting on its own cannot know what the others have counted to, so
+   two of them reach TRX-0448 on the same afternoon and the books end up with
+   one number answering to two different invoices. That is not theory here: 62
+   numbers in these books were issued twice before this existed.
+
+   So the company keeps one counter per prefix on the server, and a device
+   reserves a block of numbers from it before it needs them. Two blocks never
+   overlap, so two devices can never issue the same number.
+
+   Entry must never wait for a network. A device holding no block falls back to
+   counting on its own and stamps the number with the device it came from —
+   TRX-4K7P-0001 — which cannot be mistaken for, or collide with, a number the
+   company's counter issued. */
+
+const NUM_KEY   = "environmsafe.numbers";
+const NUM_BLOCK = 20;                 // numbers reserved in one request
+const NUM_LOW   = 5;                  // ask for more once this few remain
+const blankNumbers = () => ({ companyId:"", blocks:{}, own:{} });
+
+let NUMBERS = blankNumbers();
+try { NUMBERS = Object.assign(blankNumbers(), JSON.parse(localStorage.getItem(NUM_KEY) || "null") || {}); }
+catch (e) { NUMBERS = blankNumbers(); }
+if (!NUMBERS.blocks || typeof NUMBERS.blocks !== "object") NUMBERS.blocks = {};
+if (!NUMBERS.own    || typeof NUMBERS.own    !== "object") NUMBERS.own    = {};
+
+function numbersSave() {
+  try { localStorage.setItem(NUM_KEY, JSON.stringify(NUMBERS)); } catch (e) { /* full: numbering still works this session */ }
+}
+
+/** Which company's counter these reservations came from, if any. */
+function numbersCompany() {
+  try { return (SYNC && SYNC.companyId) || ""; } catch (e) { return ""; }
+}
+
+/** The block in hand for this prefix, or null. Numbers reserved for another
+    company's books are not ours to spend. */
+function numbersHeld(prefix) {
+  const co = numbersCompany();
+  if (!co) return null;
+  if (NUMBERS.companyId !== co) {
+    // The blocks belonged to the other company's counter. The device's own
+    // counter stays: it is the device's, and it must never go backwards.
+    NUMBERS.companyId = co; NUMBERS.blocks = {}; numbersSave();
+    return null;
+  }
+  const b = NUMBERS.blocks[prefix];
+  return (b && b.next <= b.end) ? b : null;
+}
+
+const numbersAsking = Object.create(null);
+
+/** Reserve the next block from the company's counter. Never throws: a device
+    that cannot reach the server simply keeps numbering on its own. */
+async function numbersReserve(prefix) {
+  const co = numbersCompany();
+  if (!co || numbersAsking[prefix]) return false;
+  if (typeof cloudSignedIn !== "function" || !cloudSignedIn()) return false;
+  numbersAsking[prefix] = true;
+  try {
+    const start = Number(await cloudRest("/rpc/es_reserve_numbers", {
+      method: "POST",
+      body: JSON.stringify({ p_company: co, p_prefix: prefix, p_count: NUM_BLOCK })
+    }));
+    if (!isFinite(start) || start < 1) return false;
+    NUMBERS.companyId = co;
+    const held = NUMBERS.blocks[prefix];
+    /* Unspent numbers are kept only when the new block carries straight on from
+       the old one. Otherwise the older block is let go rather than mixed in:
+       one block in hand, always, so no number is ever spent twice. */
+    NUMBERS.blocks[prefix] = (held && held.next <= held.end && held.end + 1 === start)
+      ? { next: held.next, end: start + NUM_BLOCK - 1 }
+      : { next: start,     end: start + NUM_BLOCK - 1 };
+    numbersSave();
+    return true;
+  } catch (e) { return false; }
+  finally { delete numbersAsking[prefix]; }
+}
+
+/** Top up while there is still enough in hand to keep working meanwhile. */
+function numbersTopUp(prefix) {
+  const b = numbersHeld(prefix);
+  if (b && (b.end - b.next + 1) > NUM_LOW) return;
+  numbersReserve(prefix);
+}
+
+/** After a sync, restock what this device actually uses, so entry is never
+    held up waiting for the network. */
+function numbersWarm() {
+  const want = Object.keys(NUMBERS.blocks || {});
+  if (want.indexOf("TRX") < 0) want.push("TRX");
+  want.forEach(numbersTopUp);
+}
+
+/** Every number this device has already stamped on a record under `head`. */
+function numbersUsed(head) {
+  const used = Object.create(null);
+  SYNC_TABLES.forEach(tbl => (DB[tbl] || []).forEach(r => {
+    const id = r && r.id;
+    if (typeof id !== "string" || id.indexOf(head) !== 0) return;
+    const m = /([0-9]+)$/.exec(id);
+    if (m) used[Number(m[1])] = true;
+  }));
+  return used;
+}
+
+/** The next number this device counts for itself, stamped with its own tag.
+    Kept where a reload can find it, and walked past anything the books already
+    answer to — a restored backup must not start handing out used numbers. */
+function nextOwnId(prefix) {
+  const tag  = deviceTag();
+  const head = tag ? `${prefix}-${tag}-` : `${prefix}-`;
+  const used = numbersUsed(head);
+  let n = Math.max(NUMBERS.own[prefix] || 0, DB.meta.seq[prefix] || 0) + 1;
+  while (used[n]) n++;
+  NUMBERS.own[prefix] = n;
+  DB.meta.seq[prefix] = n;
+  numbersSave();
+  return head + String(n).padStart(4,"0");
+}
+
 function nextId(prefix) {
-  DB.meta.seq[prefix] = (DB.meta.seq[prefix] || 0) + 1;
-  const n = String(DB.meta.seq[prefix]).padStart(4,"0");
-  const tag = deviceTag();
-  return tag ? `${prefix}-${tag}-${n}` : `${prefix}-${n}`;
+  const b = numbersHeld(prefix);
+  if (b) {
+    const n = b.next++;
+    numbersSave();
+    numbersTopUp(prefix);
+    return `${prefix}-${String(n).padStart(4,"0")}`;
+  }
+  numbersTopUp(prefix);
+  return nextOwnId(prefix);
 }
 
 /* ---------- helpers ---------- */
@@ -1856,7 +1985,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.17.0";
+const APP_VERSION = "1.18.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -4778,6 +4907,8 @@ async function syncNow(quiet) {
     SYNC_LAST_FAIL = "";
     syncSave();
     if (pulled) save();
+    // Numbers for the work to come, while the connection is known good.
+    numbersWarm();
     // With the books safely up, take the day's copy if one is due.
     driveMaybeBackup();
     if (!quiet) toast("Synced — " + pushed + " sent, " + pulled + " received");

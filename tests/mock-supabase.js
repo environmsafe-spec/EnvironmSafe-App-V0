@@ -66,6 +66,33 @@ function startMockSupabase(port, opts) {
         if (u.startsWith('/rest/v1/es_members'))
           return send(200, [{ company_id: COMPANY, role: 'Administrator' }]);
 
+        /* The company's document-number counter. Blocks handed out here never
+           overlap, which is the whole reason the app asks rather than counting
+           on its own. */
+        if (u.startsWith('/rest/v1/rpc/es_reserve_numbers')) {
+          if (req.method !== 'POST') return send(405, { message: 'method not allowed' });
+          const prefix = String(p.p_prefix || ''), count = Number(p.p_count);
+          if (!/^[A-Z]{2,6}$/.test(prefix) || !(count >= 1 && count <= 200))
+            return send(400, { message: 'not a document prefix' });
+          if (srv.counterFails) { srv.counterFails--; return send(500, { message: 'staged failure' }); }
+          if (!(prefix in srv.counters)) {
+            // Seeded above every number the books already carry, deleted rows
+            // included, so a retired number is never handed out again.
+            let max = 0;
+            for (const r of rows.values()) {
+              const id = (r.data && r.data.id) || '';
+              if (typeof id !== 'string' || id.indexOf(prefix + '-') !== 0) continue;
+              const m = /([0-9]+)$/.exec(id);
+              if (m) max = Math.max(max, Number(m[1]));
+            }
+            srv.counters[prefix] = max + 1;
+          }
+          const start = srv.counters[prefix];
+          srv.counters[prefix] = start + count;
+          srv.reserves++;
+          return send(200, start);
+        }
+
         if (u.startsWith('/rest/v1/es_records')) {
           if (req.method === 'POST') {
             const at = stamp();
@@ -138,6 +165,9 @@ function startMockSupabase(port, opts) {
   });
 
   srv.refreshes = 0;
+  srv.counters = Object.create(null);   // prefix -> the next number to hand out
+  srv.reserves = 0;
+  srv.counterFails = 0;                 // stage this many refusals from the counter
   srv.driveFiles = new Map();
   srv.driveSeq = 0;
   srv.driveFails = 0;
