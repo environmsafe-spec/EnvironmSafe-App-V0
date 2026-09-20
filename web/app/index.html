@@ -757,6 +757,21 @@ const today = () => new Date().toISOString().slice(0,10);
 const monthOf = d => (d || "").slice(0,7);
 const rowsOf = tbl => DB[tbl] || [];
 const byId = (tbl, id) => rowsOf(tbl).find(r => r.id === id);
+/* One row per document number.
+   The books do hold records that answer to the same number twice. Anything that
+   looks a record up by its number already takes the first and ignores the rest —
+   so a list that offers both puts the same name in a drop list twice and, far
+   worse, counts that person's or that job's money twice in a report total.
+   Lists to pick from, and lists a report adds up, go through here. The register
+   screens still show every record, so a duplicate stays visible and fixable. */
+function oneEach(list) {
+  const seen = Object.create(null), out = [];
+  (list || []).forEach(r => {
+    if (!r || seen[r.id]) return;
+    seen[r.id] = true; out.push(r);
+  });
+  return out;
+}
 /* Lists people pick from read in order. Plain text sorting puts "Go Green-10"
    before "Go Green-2" because it compares the "1" against the "2" and stops;
    comparing the numbers inside as numbers is what "smallest to largest" means
@@ -895,16 +910,50 @@ const isRefundIn       = tx => tx.type === "REFUND FROM SUPPLIER";
    itself as the office starts applying receipts. */
 const settlesCustomer = tx => { const y = typeOf(tx.type); return !!y.cash && y.party === "customer"; };
 const settlesSupplier = tx => { const y = typeOf(tx.type); return !!y.cash && y.party === "supplier"; };
-const uninvoiced = list => sum(list.filter(x => settlesCustomer(x) && isCashIn(x)), unappliedOf)
-                         - sum(list.filter(x => settlesCustomer(x) && isCashOut(x)), unappliedOf);
-const unbilled   = list => sum(list.filter(x => settlesSupplier(x) && isCashOut(x) && !isCapital(x)), unappliedOf)
-                         - sum(list.filter(x => settlesSupplier(x) && isCashIn(x)), unappliedOf);
+/* Settlement is always in the document's own currency, so `unappliedOf` must
+   stay in it. Profit is read in whatever currency the report is showing, and
+   adding an unconverted riyal to a converted dollar is how a converted profit
+   came out wrong. */
+const unappliedShown = tx => FX_ON ? toUsd(unappliedOf(tx), txCurrency(tx), tx.fxRate) : unappliedOf(tx);
+const uninvoiced = list => sum(list.filter(x => settlesCustomer(x) && isCashIn(x)), unappliedShown)
+                         - sum(list.filter(x => settlesCustomer(x) && isCashOut(x)), unappliedShown);
+const unbilled   = list => sum(list.filter(x => settlesSupplier(x) && isCashOut(x) && !isCapital(x)), unappliedShown)
+                         - sum(list.filter(x => settlesSupplier(x) && isCashIn(x)), unappliedShown);
 
 const invoicedRevenue = list => sum(list.filter(isRevenue), amountOf) - sum(list.filter(isSalesReturn), amountOf);
 const netRevenue = list => invoicedRevenue(list) + uninvoiced(list);
 /** Purchases less what we sent back. */
 const billedCost = list => sum(list.filter(isCost), amountOf) - sum(list.filter(isPurchaseReturn), amountOf);
 const netCost    = list => billedCost(list) + unbilled(list);
+
+/* The same arithmetic as netRevenue and netCost, one row at a time, so a list
+   of entries adds up to exactly the figures the summary shows. A report that
+   cannot show its working is a report nobody argues with and nobody trusts. */
+function profitParts(x) {
+  let rev = 0, cost = 0;
+  if (isRevenue(x))        rev  += amountOf(x);
+  if (isSalesReturn(x))    rev  -= amountOf(x);
+  if (isCost(x))           cost += amountOf(x);
+  if (isPurchaseReturn(x)) cost -= amountOf(x);
+  if (settlesCustomer(x)) {
+    if (isCashIn(x))  rev += unappliedShown(x);
+    if (isCashOut(x)) rev -= unappliedShown(x);
+  }
+  if (settlesSupplier(x)) {
+    if (isCashOut(x) && !isCapital(x)) cost += unappliedShown(x);
+    if (isCashIn(x))                   cost -= unappliedShown(x);
+  }
+  return { rev, cost };
+}
+/** Why a row counted the way it did, in the words the office uses. */
+function profitBasis(x) {
+  if (isRevenue(x) || isSalesReturn(x)) return "Invoiced";
+  if (isCost(x) || isPurchaseReturn(x)) return "Billed";
+  if (settlesCustomer(x) || settlesSupplier(x))
+    return Math.abs(unappliedShown(x)) > 0.005 ? "No document yet" : "Applied to a document";
+  if (isCapital(x)) return "Fixed asset — not a cost";
+  return "Not part of profit";
+}
 const isCashIn  = tx => flowOf(tx) === "cash_in";
 const isCashOut = tx => flowOf(tx) === "cash_out" || flowOf(tx) === "cost_cash_out";
 const rawAmount = tx => num(tx.debit) + num(tx.credit);
@@ -1303,6 +1352,26 @@ function currencyChoices() {
 }
 const curSuffix = () => (FX_ON ? " USD" : CUR ? " " + CUR : "");
 
+/* "Everything, in one currency" is a currency as far as anyone choosing one is
+   concerned, so it belongs on every list where a currency is chosen to look at
+   money — the top bar, the ledger, the reports. It is deliberately not offered
+   where a currency is being recorded: no payment was ever made in "converted". */
+const FX_LABEL = "All → USD (converted)";
+const curLabel = c => c === FXV ? FX_LABEL : c;
+/** Options for a picker that chooses what to look at, `all` naming the blank. */
+function currencyOptionsHtml(chosen, all) {
+  return `<option value="">${esc(all || "All currencies")}</option>` +
+    currencyChoices().map(c =>
+      `<option value="${esc(c)}" ${c === chosen ? "selected" : ""}>${esc(c)}</option>`).join("") +
+    `<option value="${FXV}" ${chosen === FXV ? "selected" : ""}>${esc(FX_LABEL)}</option>`;
+}
+/** Turn the whole system to that currency — or to the converted view. */
+function setCurrency(v) {
+  CUR = v || "";
+  FX_ON = CUR === FXV;
+  try { localStorage.setItem(FX_ON_KEY, CUR); } catch (e) { /* full */ }
+}
+
 function inRange(tx, from, to) {
   if (from && tx.date < from) return false;
   if (to && tx.date > to) return false;
@@ -1411,7 +1480,7 @@ const totalNBV = upto => rowsOf("assets")
   .filter(a => assetLive(a)).reduce((s,a) => s + netBookValue(a, upto), 0);
 const periodDepn = (from, to) => rowsOf("assets").reduce((s,a) => s + depnInPeriod(a, from, to), 0);
 
-const curAccounts = () => rowsOf("accounts").filter(a => FX_ON || !CUR || (a.currency || CO().currency) === CUR);
+const curAccounts = () => oneEach(rowsOf("accounts")).filter(a => FX_ON || !CUR || (a.currency || CO().currency) === CUR);
 const totalCash = () => curAccounts().reduce((s,a) => s + accountBalance(a.id), 0);
 const totalAR = () => rowsOf("customers").reduce((s,c) => s + customerBalance(c.id), 0);
 const totalAP = () => rowsOf("suppliers").reduce((s,x) => s + supplierBalance(x.id), 0);
@@ -1985,7 +2054,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.19.0";
+const APP_VERSION = "1.20.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -2016,7 +2085,7 @@ function refMatches(tbl, val, labelKey, q) {
   const label = REF_LABELS[labelKey] || (r => r.nameEn || r.id);
   const words = String(q || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
   const hay = r => `${label(r)} ${r.id}`.toLowerCase();
-  return rowsOf(tbl).slice()
+  return oneEach(rowsOf(tbl))
     .sort((x, y) => inOrder(label(x), label(y)))
     // Whatever is already chosen stays on the list however it is narrowed, or
     // typing would quietly unpick what somebody had already answered.
@@ -2609,14 +2678,21 @@ function viewLedger(m) {
        <option value="waiting" ${ledgerFilter.only === "waiting" ? "selected" : ""}>Only waiting for approval</option>
        <option value="unapplied" ${ledgerFilter.only === "unapplied" ? "selected" : ""}>Only money not yet applied</option>
      </select>`));
-  bar.appendChild(fld("Currency | العملة", `<select id="f_cur"><option value="">All currencies</option>${
-    currenciesInUse().map(c => `<option ${c === ledgerFilter.currency ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`));
+  bar.appendChild(fld("Currency | العملة", `<select id="f_cur">${
+    currencyOptionsHtml(FX_ON ? FXV : ledgerFilter.currency)}</select>`));
   bar.appendChild(fld("Search | بحث", `<input id="f_q" value="${esc(ledgerFilter.q)}"
     placeholder="anything — name, amount, project, account, type, note…" style="min-width:16rem">`));
   const apply = el("button", { class:"btn sm" }, "Apply");
   const runFilter = () => {
+    /* Choosing the converted view here turns the whole system to it, the same
+       as choosing it in the top bar — one switch, reachable from where the
+       question came up. The rows themselves are then not narrowed at all,
+       because the point of it is to see every currency at once. */
+    const wantCur = $("#f_cur").value;
+    if (wantCur === FXV || FX_ON) setCurrency(wantCur === FXV ? FXV : "");
     ledgerFilter = { from:$("#f_from").value, to:$("#f_to").value, type:$("#f_type").value,
-                     status:$("#f_status").value, currency:$("#f_cur").value,
+                     status:$("#f_status").value,
+                     currency: wantCur === FXV ? "" : wantCur,
                      only:$("#f_only").value, q:$("#f_q").value.trim().toLowerCase() };
     render();
   };
@@ -2877,7 +2953,7 @@ function parseCsv(text) {
    Reports
    ========================================================================= */
 
-let rep = { from:"", to:"", entity:"", sel:{} };
+let rep = { from:"", to:"", entity:"", sel:{}, detail:"" };
 
 /* ---------- choosing many, or all ----------
    A report question is rarely about one thing. "What did we pay the three
@@ -2895,12 +2971,21 @@ const SEL_DIMS = {
   account:  { label:"Accounts",   table:"accounts",   get:x => x.accountId  },
   category: { label:"Categories", table:"categories", get:x => x.categoryId },
   type:     { label:"Types",      values:() => TXTYPES.map(x => x.v), get:x => x.type },
-  currency: { label:"Currencies", values:() => currencyChoices(),     get:x => txCurrency(x) },
+  /* The converted view sits among the currencies here too. It is not a filter —
+     it says how to show what the other choices let through — so `selOk` leaves
+     it out of the narrowing and `perCurrency` acts on it. */
+  currency: { label:"Currencies", get:x => txCurrency(x), view:FXV,
+              values:() => currencyChoices().map(c => ({ v:c, label:c }))
+                             .concat([{ v:FXV, label:FX_LABEL }]) },
 };
 
 const selOf   = k => (rep.sel && rep.sel[k]) || [];
 /** Nothing chosen means everything, so an untouched report is unfiltered. */
-const selHas  = (k, v) => { const s = selOf(k); return !s.length || s.includes(v || ""); };
+const selHas  = (k, v) => {
+  const view = SEL_DIMS[k] && SEL_DIMS[k].view;
+  const s = selOf(k).filter(x => x !== view);     // a way to look, not a way to narrow
+  return !s.length || s.includes(v || "");
+};
 const selAny  = () => Object.keys(SEL_DIMS).some(k => selOf(k).length);
 
 /** Does this transaction pass every choice made on the report toolbar? */
@@ -2911,8 +2996,8 @@ function selOk(x) {
 /** The options a dimension offers, as {v, label}. */
 function selOptions(k) {
   const d = SEL_DIMS[k];
-  if (d.values) return d.values().map(v => ({ v, label:v }));
-  return rowsOf(d.table).map(r => ({ v:r.id, label:r.nameEn || r.id }))
+  if (d.values) return d.values().map(v => (v && v.v) ? v : { v, label:v });
+  return oneEach(rowsOf(d.table)).map(r => ({ v:r.id, label:r.nameEn || r.id }))
     .sort((x, y) => inOrder(x.label, y.label));
 }
 
@@ -3400,9 +3485,17 @@ function viewReport(m, kind) {
   const entTbl = { customer:"customers", supplier:"suppliers", project:"projects",
                    employee:"employees", bank:"accounts", item:"items", asset:"assets" }[kind];
   if (entTbl) bar.appendChild(fld("Select | اختر",
-    `<select id="r_ent"><option value="">— all —</option>${rowsOf(entTbl).slice()
+    `<select id="r_ent"><option value="">— all —</option>${oneEach(rowsOf(entTbl))
       .sort((a, b) => inOrder(a.nameEn, b.nameEn)).map(r =>
       `<option value="${esc(r.id)}" ${r.id === rep.entity ? "selected" : ""}>${esc(r.nameEn)}</option>`).join("")}</select>`));
+
+  /* Profitability answers two different questions: how did the jobs do, and
+     what exactly is behind those figures. Both are the same report, so it is
+     one switch rather than two reports that can disagree. */
+  if (kind === "project") bar.appendChild(fld("View | العرض",
+    `<select id="r_detail"><option value="">Summary</option>
+       <option value="all" ${rep.detail ? "selected" : ""}>Summary and every transaction</option>
+     </select>`));
 
   // Which questions this report can be narrowed by. Its own subject comes first.
   const DIMS_FOR = {
@@ -3423,6 +3516,7 @@ function viewReport(m, kind) {
     b.onclick = () => openMultiPick(dim, () => {
       rep.from = $("#r_from").value; rep.to = $("#r_to").value;
       if (entTbl) rep.entity = $("#r_ent").value;
+      if ($("#r_detail")) rep.detail = $("#r_detail").value;
       render();
     });
     wrap.appendChild(b);
@@ -3432,7 +3526,8 @@ function viewReport(m, kind) {
   const go2 = el("button", { class:"btn sm" }, "Run");
   go2.onclick = () => {
     rep = { from:$("#r_from").value, to:$("#r_to").value,
-            entity: entTbl ? $("#r_ent").value : "", sel: rep.sel };
+            entity: entTbl ? $("#r_ent").value : "", sel: rep.sel,
+            detail: $("#r_detail") ? $("#r_detail").value : "" };
     render();
   };
   bar.appendChild(go2);
@@ -3767,7 +3862,7 @@ function documentToXlsx(lines, refNo) {
 /* ---- fixed asset register & depreciation ---- */
 
 function repAssets(m) {
-  const all = rowsOf("assets");
+  const all = oneEach(rowsOf("assets"));
   if (!all.length) {
     m.appendChild(el("div", { class:"card" }, `<div class="empty">
       No assets yet. Add the ones you already own under Master data → Fixed assets,
@@ -3841,7 +3936,7 @@ const soldTypes   = ["INVOICE OUT","QUOTATION OUT","PO IN"];
 const boughtTypes = ["INVOICE IN","QUOTATION IN","PO OUT"];
 
 function repItems(m) {
-  const list = rep.entity ? [byId("items", rep.entity)].filter(Boolean) : rowsOf("items");
+  const list = rep.entity ? [byId("items", rep.entity)].filter(Boolean) : oneEach(rowsOf("items"));
   if (!list.length) {
     m.appendChild(el("div", { class:"card" }, `<div class="empty">
       No products or services yet. Add them under Master data → Products &amp; services,
@@ -4130,10 +4225,19 @@ function repSummary(m) {
    get that one; pick the converted view and you get one section in USD. */
 function perCurrency(m, draw) {
   const picked = selOf("currency");
+  // Asked for everything in one currency: one pass, converted, whatever the
+  // top bar happens to be set to.
+  if (picked.includes(FXV)) {
+    const prevCur = CUR, prevFx = FX_ON;
+    CUR = FXV; FX_ON = true;
+    draw(m);
+    CUR = prevCur; FX_ON = prevFx;
+    return;
+  }
   let list = currenciesInUse();
   if (picked.length) list = list.filter(c => picked.includes(c));
   // One currency chosen on the toolbar is as good as choosing it in the top bar.
-  if (!CUR && picked.length === 1) {
+  if (!CUR && picked.length === 1 && picked[0] !== FXV) {
     const prevCur = CUR, prevFx = FX_ON;
     CUR = picked[0]; FX_ON = false;
     draw(m);
@@ -4287,6 +4391,47 @@ function repProjectOne(m) {
   }).join("");
   w.innerHTML = `<table><thead>${headRow(allCols)}</thead><tbody>${rows}</tbody></table>`;
   m.appendChild(w);
+
+  if (rep.detail) list.forEach(p => projectDetail(m, p));
+}
+
+/* Every entry on a job, and what each one did to its profit. The two money
+   columns are the same arithmetic the summary line above used, one row at a
+   time, so they add up to it exactly — and "Counted as" says why a payment with
+   no invoice behind it is revenue all the same. Entries that are part of the
+   job but not part of its profit are listed too, reading zero: a transaction
+   missing from a list of every transaction is the thing that loses trust. */
+function projectDetail(m, p) {
+  const mine = txs({ projectId:p.id, from:rep.from, to:rep.to }).filter(selOk);
+  if (!mine.length) return;
+  const card = el("div", { class:"card" });
+  card.appendChild(el("h2", {}, `${esc(p.nameEn)} — every transaction`));
+  const w = el("div", { class:"tablewrap" });
+  let run = 0;
+  const body = mine.map(x => {
+    const q = profitParts(x);
+    run += q.rev - q.cost;
+    return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}</td>
+      <td>${esc(nameOf("customers",x.customerId) || nameOf("suppliers",x.supplierId)
+              || nameOf("employees",x.employeeId) || "")}</td>
+      <td>${esc(nameOf("accounts", x.accountId))}</td>
+      <td>${esc(x.refNo || "")}</td>
+      <td>${esc(profitBasis(x))}</td>
+      <td>${esc((x.notes || "").slice(0, 60))}</td>
+      <td class="num">${q.rev ? fmt(q.rev) : ""}</td>
+      <td class="num">${q.cost ? fmt(q.cost) : ""}</td>
+      <td class="num">${fmt(run)}</td></tr>`;
+  }).join("");
+  const rev = netRevenue(mine), cst = netCost(mine);
+  w.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
+    <th>Party</th><th>Account</th><th>${esc(t("ref"))}</th><th>Counted as</th>
+    <th>${esc(t("notes"))}</th><th class="num">Revenue</th><th class="num">Cost</th>
+    <th class="num">Profit to date</th></tr></thead><tbody>${body}</tbody>
+    <tfoot><tr><td colspan="7">${esc(t("total"))}${curSuffix()}</td>
+      <td class="num">${fmt(rev)}</td><td class="num">${fmt(cst)}</td>
+      <td class="num">${fmt(rev - cst)}</td></tr></tfoot></table>`;
+  card.appendChild(w);
+  m.appendChild(card);
 }
 
 /** The rows a report lists: the one chosen in Select, or those ticked on the
@@ -4294,7 +4439,7 @@ function repProjectOne(m) {
 function repRows(dim, table) {
   const chosen = selOf(dim);
   if (rep.entity) return [byId(table, rep.entity)].filter(Boolean);
-  const list = rowsOf(table);
+  const list = oneEach(rowsOf(table));
   return chosen.length ? list.filter(r => chosen.includes(r.id)) : list;
 }
 
@@ -4355,59 +4500,64 @@ function repEmployeeOne(m) {
     <tfoot>${footRow(allCols, cols.lead.length, foot)}</tfoot></table>`;
   m.appendChild(w);
 
-  /* One employee chosen: what they cost, project by project, then every entry. */
-  if (rep.entity && list[0]) {
-    const e = list[0];
-    const mine = txs({ employeeId:e.id, from:rep.from, to:rep.to }).filter(paidToEmployee).filter(selOk);
-    const byProject = {};
-    mine.forEach(x => {
-      const k = x.projectId || "";
-      (byProject[k] = byProject[k] || []).push(x);
-    });
-    const order = Object.keys(byProject).sort((a, b) =>
-      sum(byProject[b], amountOf) - sum(byProject[a], amountOf));
+  /* Whoever was chosen — one from Select, or several ticked on the toolbar —
+     gets their own detail: what they cost job by job, then every entry behind
+     it. Picking three people used to show three summary lines and not one of
+     the payments underneath them. With nobody chosen there is nothing to open:
+     fifty-nine people would be a report nobody can read. */
+  if (rep.entity || selOf("employee").length) list.forEach(e => employeeDetail(m, e));
+}
 
-    const c1 = el("div", { class:"card" });
-    c1.appendChild(el("h2", {}, `${esc(e.nameEn)} — paid by project`));
-    const t1 = el("div", { class:"tablewrap" });
-    const all = employeeBuckets(mine);
-    t1.innerHTML = `<table><thead><tr><th>Project</th><th class="num">Salary</th>
-      <th class="num">Work & expenses</th><th class="num">Expense claims</th>
-      <th class="num">Debit (owed back)</th><th class="num">Drawings</th>
-      <th class="num">Total paid</th><th class="num">Entries</th></tr></thead><tbody>${
-      order.map(k => {
-        const b = employeeBuckets(byProject[k]);
-        return `<tr><td>${esc(nameOf("projects", k) || "— no project —")}</td>
-          <td class="num">${fmt(b.sal)}</td><td class="num">${fmt(b.work)}</td>
-          <td class="num">${fmt(b.claim)}</td><td class="num">${fmt(b.adv)}</td>
-          <td class="num">${fmt(b.draw)}</td>
-          <td class="num">${fmt(b.total)}</td><td class="num">${byProject[k].length}</td></tr>`;
-      }).join("") || `<tr><td colspan="8" class="empty">${esc(t("none"))}</td></tr>`}</tbody>
-      <tfoot><tr><td>${esc(t("total"))}</td>
-        <td class="num">${fmt(all.sal)}</td><td class="num">${fmt(all.work)}</td>
-        <td class="num">${fmt(all.claim)}</td><td class="num">${fmt(all.adv)}</td>
-        <td class="num">${fmt(all.draw)}</td><td class="num">${fmt(all.total)}</td>
-        <td class="num">${mine.length}</td></tr></tfoot></table>`;
-    c1.appendChild(t1);
-    m.appendChild(c1);
+function employeeDetail(m, e) {
+  const mine = txs({ employeeId:e.id, from:rep.from, to:rep.to }).filter(paidToEmployee).filter(selOk);
+  const byProject = {};
+  mine.forEach(x => {
+    const k = x.projectId || "";
+    (byProject[k] = byProject[k] || []).push(x);
+  });
+  const order = Object.keys(byProject).sort((a, b) =>
+    sum(byProject[b], amountOf) - sum(byProject[a], amountOf));
 
-    const c2 = el("div", { class:"card" });
-    c2.appendChild(el("h2", {}, `${esc(e.nameEn)} — every payment`));
-    const t2 = el("div", { class:"tablewrap" });
-    let run = 0;
-    t2.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
-      <th>Project</th><th>Account</th><th>${esc(t("ref"))}</th><th>${esc(t("notes"))}</th>
-      <th class="num">${esc(t("amount"))}</th><th class="num">Running</th></tr></thead><tbody>${
-      mine.map(x => { run += amountOf(x);
-        return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}</td>
-          <td>${esc(nameOf("projects", x.projectId))}</td>
-          <td>${esc(nameOf("accounts", x.accountId))}</td>
-          <td>${esc(x.refNo || "")}</td><td>${esc((x.notes || "").slice(0, 60))}</td>
-          <td class="num">${fmt(amountOf(x))}</td><td class="num">${fmt(run)}</td></tr>`;
-      }).join("") || `<tr><td colspan="8" class="empty">${esc(t("none"))}</td></tr>`}</tbody></table>`;
-    c2.appendChild(t2);
-    m.appendChild(c2);
-  }
+  const c1 = el("div", { class:"card" });
+  c1.appendChild(el("h2", {}, `${esc(e.nameEn)} — paid by project`));
+  const t1 = el("div", { class:"tablewrap" });
+  const all = employeeBuckets(mine);
+  t1.innerHTML = `<table><thead><tr><th>Project</th><th class="num">Salary</th>
+    <th class="num">Work & expenses</th><th class="num">Expense claims</th>
+    <th class="num">Debit (owed back)</th><th class="num">Drawings</th>
+    <th class="num">Total paid</th><th class="num">Entries</th></tr></thead><tbody>${
+    order.map(k => {
+      const b = employeeBuckets(byProject[k]);
+      return `<tr><td>${esc(nameOf("projects", k) || "— no project —")}</td>
+        <td class="num">${fmt(b.sal)}</td><td class="num">${fmt(b.work)}</td>
+        <td class="num">${fmt(b.claim)}</td><td class="num">${fmt(b.adv)}</td>
+        <td class="num">${fmt(b.draw)}</td>
+        <td class="num">${fmt(b.total)}</td><td class="num">${byProject[k].length}</td></tr>`;
+    }).join("") || `<tr><td colspan="8" class="empty">${esc(t("none"))}</td></tr>`}</tbody>
+    <tfoot><tr><td>${esc(t("total"))}</td>
+      <td class="num">${fmt(all.sal)}</td><td class="num">${fmt(all.work)}</td>
+      <td class="num">${fmt(all.claim)}</td><td class="num">${fmt(all.adv)}</td>
+      <td class="num">${fmt(all.draw)}</td><td class="num">${fmt(all.total)}</td>
+      <td class="num">${mine.length}</td></tr></tfoot></table>`;
+  c1.appendChild(t1);
+  m.appendChild(c1);
+
+  const c2 = el("div", { class:"card" });
+  c2.appendChild(el("h2", {}, `${esc(e.nameEn)} — every payment`));
+  const t2 = el("div", { class:"tablewrap" });
+  let run = 0;
+  t2.innerHTML = `<table><thead><tr><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th>
+    <th>Project</th><th>Account</th><th>${esc(t("ref"))}</th><th>${esc(t("notes"))}</th>
+    <th class="num">${esc(t("amount"))}</th><th class="num">Running</th></tr></thead><tbody>${
+    mine.map(x => { run += amountOf(x);
+      return `<tr><td>${esc(x.date)}</td><td>${esc(x.type)}</td>
+        <td>${esc(nameOf("projects", x.projectId))}</td>
+        <td>${esc(nameOf("accounts", x.accountId))}</td>
+        <td>${esc(x.refNo || "")}</td><td>${esc((x.notes || "").slice(0, 60))}</td>
+        <td class="num">${fmt(amountOf(x))}</td><td class="num">${fmt(run)}</td></tr>`;
+    }).join("") || `<tr><td colspan="8" class="empty">${esc(t("none"))}</td></tr>`}</tbody></table>`;
+  c2.appendChild(t2);
+  m.appendChild(c2);
 }
 
 function repBank(m) {
@@ -4984,6 +5134,9 @@ function driveSave() {
 /* The client id belongs to the company, not the device, so it rides along with
    the books and every other device is configured the moment it syncs. */
 const driveClientId = () => ((DB.meta && DB.meta.driveClientId) || "").trim();
+/* Where Google has to be told this system lives. It changes the day the system
+   moves to a new address, and nothing in Google's refusal says so. */
+const driveOrigin = () => location.origin;
 const driveReady    = () => !!DRIVE.token && Date.now() < DRIVE.expiresAt - 60000;
 const driveSetUp    = () => !!driveClientId();
 
@@ -5023,9 +5176,17 @@ async function driveToken(interactive) {
         driveSave();
         resolve(DRIVE.token);
       },
+      /* Google's own window says only "Access blocked: Authorization Error",
+         which tells nobody what to do. Almost always it means this address is
+         not on the client's list of allowed origins — which is what happens the
+         day a system moves to its own domain. So the message names the exact
+         line to paste and where. */
       error_callback: e => { settled = true;
-        reject(new Error((e && e.type === "popup_closed") ? "The Google window was closed."
-                                                          : "Google refused the request.")); }
+        reject(new Error(
+          (e && e.type === "popup_closed") ? "The Google window was closed." :
+          "Google would not let this address in. Add " + location.origin +
+          " to the OAuth client's Authorised JavaScript origins in the Google " +
+          "Cloud console (APIs & Services → Credentials), then try again.")); }
     });
     // Without a gesture Google may only renew silently; that is what we want for
     // the automatic daily copy, and why a failure here is not treated as fatal.
@@ -5179,6 +5340,16 @@ function driveCard(m) {
     box.appendChild(el("p", { style:"margin:.2rem 0 .5rem" },
       '<span class="card-note">Last copy: ' + esc(when)
       + (DRIVE.lastFile ? " &middot; " + esc(DRIVE.lastFile) : "") + "</span>"));
+    /* Google only lets a page in from an address the client was told about, and
+       says nothing useful when it refuses. Moving to a new address is exactly
+       when that bites, so the address to allow is on the screen before anyone
+       presses anything. */
+    box.appendChild(el("p", { class:"card-note", style:"margin:.2rem 0 .6rem" },
+      'This system is at <b>' + esc(driveOrigin()) + '</b>. If Google answers '
+      + '"Access blocked: Authorization Error", that address is missing from the '
+      + "OAuth client's <b>Authorised JavaScript origins</b> — add it in the Google "
+      + "Cloud console under APIs &amp; Services → Credentials, and it will work again. "
+      + "Nothing in the books needs to change."));
     const bar = el("div", { style:"display:flex;gap:.5rem;flex-wrap:wrap" });
     const bNow = el("button", { class:"btn gold" }, "Copy to Drive now");
     bNow.onclick = async () => {
@@ -5730,17 +5901,9 @@ $("#pendBtn").onclick = async () => {
 };
 
 function fillCurrencySelect() {
-  const list = currencyChoices();
-  $("#curSel").innerHTML = `<option value="">All currencies</option>` +
-    list.map(c => `<option value="${esc(c)}" ${c === CUR ? "selected" : ""}>${esc(c)}</option>`).join("") +
-    `<option value="${FXV}" ${CUR === FXV ? "selected" : ""}>All → USD (converted)</option>`;
+  $("#curSel").innerHTML = currencyOptionsHtml(CUR);
 }
-$("#curSel").onchange = e => {
-  CUR = e.target.value;
-  FX_ON = CUR === FXV;
-  localStorage.setItem("environmsafe.currency", CUR);
-  render();
-};
+$("#curSel").onchange = e => { setCurrency(e.target.value); render(); };
 
 /* ---------- login ---------- */
 
