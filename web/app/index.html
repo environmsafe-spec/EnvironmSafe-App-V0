@@ -75,6 +75,10 @@
   /* Work that has not reached the cloud yet must be visible from every screen.
      Entries sat unsent on one phone for two days with nothing on the screen to
      say so, and looked lost from everywhere else. */
+  /* The search sits directly above the list it narrows, so which list it
+     belongs to is never a guess. */
+  .refpick { display:flex; flex-direction:column; gap:.2rem; }
+  .refpick .refsearch { font-size:.78rem; padding:.28rem .4rem; }
   .pend-dot { background:var(--gold); color:#131A2A; border-radius:999px;
     padding:0 .4rem; font-size:.72rem; margin-inline-start:.35rem; }
   .pend { background:var(--gold) !important; color:#131A2A !important;
@@ -1773,7 +1777,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.15.0";
+const APP_VERSION = "1.16.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -1790,32 +1794,81 @@ const REF_LABELS = {
   item: it => `${it.code ? it.code + " — " : ""}${it.nameEn || ""}${it.unit ? " (" + it.unit + ")" : ""}`,
 };
 
-function refOptions(tbl, val, labelKey) {
+/* Eighty-nine projects is a list nobody reads; it is a list people give up on
+   and pick the nearest wrong thing from. Typing the first letters of a name
+   narrows it, and the code narrows it too, because half these records are
+   known by their number — "Zailee" and "PRJ-0023" find the same row.
+
+   The list stays an ordinary one underneath. A phone opens it as the short
+   picker it knows, the keyboard still works, and everything already built on
+   these lists — creating a record without leaving the form, filling one in
+   from elsewhere — keeps working, because nothing about it changed except
+   which rows are in it. */
+function refMatches(tbl, val, labelKey, q) {
+  const label = REF_LABELS[labelKey] || (r => r.nameEn || r.id);
+  const words = String(q || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const hay = r => `${label(r)} ${r.id}`.toLowerCase();
+  return rowsOf(tbl).slice()
+    .sort((x, y) => inOrder(label(x), label(y)))
+    // Whatever is already chosen stays on the list however it is narrowed, or
+    // typing would quietly unpick what somebody had already answered.
+    .filter(r => r.id === val || words.every(w => hay(r).includes(w)));
+}
+
+function refOptions(tbl, val, labelKey, q) {
   const label = REF_LABELS[labelKey] || (r => r.nameEn || r.id);
   return `<option value=""></option>` +
     (canEdit() && SCHEMAS[tbl] && tbl !== "users"
       ? `<option value="${ADD_NEW}">+ ${esc(t("add"))} ${esc(REF_NOUN[tbl] || "record")}…</option>` : "") +
-    rowsOf(tbl).slice()
-      .sort((x, y) => inOrder(label(x), label(y)))
-      .map(r =>
-        `<option value="${esc(r.id)}" ${r.id === val ? "selected" : ""}>${esc(label(r))}</option>`).join("");
+    refMatches(tbl, val, labelKey, q).map(r =>
+      `<option value="${esc(r.id)}" ${r.id === val ? "selected" : ""}>${esc(label(r))}</option>`).join("");
 }
 
+/* A search box earns its place on a list long enough to be worth narrowing;
+   above five rows it is only one more thing to look at. */
+const REF_SEARCH_FROM = 8;
+
 function refSelect(name, tbl, val, labelKey) {
-  return `<select name="${esc(name)}" data-reftable="${esc(tbl)}"${
+  const sel = `<select name="${esc(name)}" data-reftable="${esc(tbl)}"${
     labelKey ? ` data-reflabel="${esc(labelKey)}"` : ""}>${
     refOptions(tbl, val, labelKey)}</select>`;
+  if (rowsOf(tbl).length < REF_SEARCH_FROM) return sel;
+  return `<div class="refpick"><input type="search" class="refsearch" autocomplete="off"
+    placeholder="Type to narrow the list…">${sel}</div>`;
 }
 
 /** Put a freshly created record into every list on the page that shows its kind. */
+const searchBoxFor = sel => {
+  const wrap = sel && sel.closest && sel.closest(".refpick");
+  return wrap ? wrap.querySelector(".refsearch") : null;
+};
+
 function refreshRefSelects(tbl, pick, only) {
   document.querySelectorAll(`select[data-reftable="${tbl}"]`).forEach(sel => {
     const keep = sel === only ? pick : (sel.value === ADD_NEW ? "" : sel.value);
+    // A record just created is shown whatever was typed while looking for it.
+    const box = searchBoxFor(sel);
+    if (box) box.value = "";
     sel.innerHTML = refOptions(tbl, keep, sel.dataset.reflabel);
     sel.value = keep || "";
     sel.dataset.prev = sel.value;
   });
 }
+
+/* Typing narrows the list it sits above, and nothing else on the page. */
+document.addEventListener("input", e => {
+  const box = e.target && e.target.closest && e.target.closest(".refsearch");
+  if (!box) return;
+  const sel = box.closest(".refpick").querySelector("select[data-reftable]");
+  if (!sel) return;
+  const keep = sel.value === ADD_NEW ? "" : sel.value;
+  const tbl = sel.dataset.reftable;
+  sel.innerHTML = refOptions(tbl, keep, sel.dataset.reflabel, box.value);
+  // Narrowed to one, and nothing answered yet: that is the row being hunted.
+  const hits = refMatches(tbl, "", sel.dataset.reflabel, box.value);
+  sel.value = (!keep && box.value.trim() && hits.length === 1) ? hits[0].id : (keep || "");
+  sel.dataset.prev = sel.value;
+});
 
 /* One listener for every such list, wherever it is drawn — the entry screen, the
    edit box, or a master-data form that points at another master record. */
