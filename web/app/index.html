@@ -477,6 +477,7 @@ const SCHEMAS = {
 const T = {
   dashboard:["Dashboard","لوحة المعلومات"], daily:["Daily entry","الإدخال اليومي"],
   ledger:["Transactions","الحركات"], approvals:["Approvals","الاعتمادات"],
+  history:["History","السجل"],
   cases:["Procurement files","ملفات المشتريات"],
   masters:["Master data","البيانات الأساسية"], reports:["Reports","التقارير"],
   data:["Backup & sync","النسخ والمزامنة"], users:["Users","المستخدمون"],
@@ -508,7 +509,8 @@ const t = k => (T[k] ? T[k][LANG === "ar" ? 1 : 0] : k);
 
 const blankDb = () => ({
   meta:{ seq:{}, created:new Date().toISOString(), device:"device-" + Math.random().toString(36).slice(2,8) },
-  users:[], items:[], assets:[], customers:[], suppliers:[], employees:[], projects:[], accounts:[], categories:[], transactions:[]
+  users:[], items:[], assets:[], customers:[], suppliers:[], employees:[], projects:[], accounts:[], categories:[], transactions:[],
+  audit:[]
 });
 
 let DB = load();
@@ -572,7 +574,7 @@ function seed(d) {
    additionally carries a short device tag so two devices cannot show the same
    document number either. */
 
-const SYNC_TABLES = ["users","items","assets","customers","suppliers","employees",
+const SYNC_TABLES = ["audit","users","items","assets","customers","suppliers","employees",
                      "projects","accounts","categories","transactions"];
 
 function newUid() {
@@ -769,6 +771,60 @@ const live      = tx => tx.status !== "Cancelled";
    on decides that everything currently unapproved stops counting, and that is
    a decision for the office, on a day of its choosing, not a surprise.
    ========================================================================= */
+
+/* =========================================================================
+   The history — who changed what, and when.
+
+   Until now a figure could change and the book kept no memory of it having
+   been any other way. That is the question an argument about the numbers
+   always comes down to: not what the figure is, but who made it that and
+   when. Every change to money, to the records money is filed against, and to
+   the settings that decide what counts, leaves a line here.
+
+   Only what actually changed is kept, field by field, with the old value and
+   the new — whole copies of every record would fill the device for no gain.
+   Nothing here is ever edited: the history is written once and only added to.
+   ========================================================================= */
+
+/* Fields that change on every save without anyone having decided anything. */
+const AUDIT_SKIP = ["uid", "createdAt", "updatedAt", "approvedAt", "starter"];
+
+function fieldsChanged(before, after) {
+  const out = [];
+  const keys = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+  keys.forEach(k => {
+    if (AUDIT_SKIP.includes(k)) return;
+    const flat = v => v == null ? "" : (typeof v === "object" ? JSON.stringify(v) : String(v));
+    const a = flat(before && before[k]), b = flat(after && after[k]);
+    if (a !== b) out.push({ f:k, from:a, to:b });
+  });
+  return out;
+}
+
+/** Write one line of history. Never throws at the caller: a book that refuses
+    to record a change must still record the change to the money. */
+function noteChange(action, table, rec, changes, label) {
+  try {
+    if (!DB.audit) DB.audit = [];
+    if (Array.isArray(changes) && !changes.length && action === "change") return null;
+    const row = {
+      uid: newUid(),
+      at: new Date().toISOString(),
+      by: (USER && (USER.nameEn || USER.username)) || "",
+      action: action,
+      table: table,
+      recId: (rec && rec.id) || "",
+      label: label || (rec && (rec.nameEn || rec.refNo)) || "",
+      changes: (changes || []).slice(0, 40)
+    };
+    DB.audit.push(row);
+    return row;
+  } catch (e) { return null; }
+}
+
+const auditOf = (table, recId) => (DB.audit || [])
+  .filter(a => a.table === table && a.recId === recId)
+  .sort((a, b) => (b.at || "").localeCompare(a.at || ""));
 
 const PENDING    = "Draft";
 const approvalOn = () => CO().requireApproval === "Yes";
@@ -1055,7 +1111,8 @@ const NAV = [
     { id:"r_employee", label:"r_employee" }, { id:"r_bank", label:"r_bank" },
     { id:"r_item", label:"r_item" }, { id:"r_asset", label:"r_asset" },
     { id:"r_document", label:"r_document" } ] },
-  { group:"System", items:[ { id:"m_users", label:"users", admin:true },
+  { group:"System", items:[ { id:"history", label:"history" },
+    { id:"m_users", label:"users", admin:true },
     { id:"company", label:"company", admin:true }, { id:"data", label:"data" } ] }
 ];
 
@@ -1109,6 +1166,7 @@ function render() {
   else if (VIEW === "daily") viewDaily(m);
   else if (VIEW === "ledger") viewLedger(m);
   else if (VIEW === "approvals") viewApprovals(m);
+  else if (VIEW === "history") viewHistory(m);
   else if (VIEW === "cases") viewCases(m);
   else if (VIEW.startsWith("m_")) viewMaster(m, VIEW.slice(2));
   else if (VIEW.startsWith("r_")) viewReport(m, VIEW.slice(2));
@@ -1470,6 +1528,7 @@ function viewDaily(m) {
     };
     if (approvalOn() && tx.status === "Approved") approveTx(tx);
     DB.transactions.push(tx);
+    noteChange("create", "transactions", tx, [], `${tx.type} ${fmt(rawAmount(tx))} ${txCurrency(tx)}`);
     const asset = f.isAsset === "Yes" ? registerAssetFrom(tx, f) : null;
     save();
     entryDraft = { date:f.date, type:f.type, caseNo:f.caseNo, status:"Draft" };
@@ -1594,7 +1653,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.11.0";
+const APP_VERSION = "1.12.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -1704,6 +1763,8 @@ function txTable(list, opts = {}) {
       if (b.dataset.act === "del") {
         if (!canEdit()) return toast("Your role is read-only.");
         if (confirm(`Delete ${tx.id}?`)) {
+          noteChange("delete", "transactions", tx,
+            fieldsChanged(tx, null), `${tx.type} ${fmt(rawAmount(tx))} ${txCurrency(tx)}`);
           DB.transactions = DB.transactions.filter(x => x.id !== tx.id); save(); render();
         }
       } else editTx(tx);
@@ -1791,6 +1852,11 @@ function editTx(tx) {
     const acc = byId("accounts", f.accountId);
     const currency = acc ? (acc.currency || CO().currency || "YER") : (f.currency || tx.currency);
 
+    // The whole record as it stood, so nothing can change unrecorded — whatever
+    // is edited here later is compared against it rather than against a list of
+    // fields somebody remembered to keep up to date.
+    const before = JSON.parse(JSON.stringify(tx));
+
     Object.assign(tx, {
       date:f.date, type:f.type, phase:f.phase || ty.phase, caseNo:(f.caseNo || "").trim(),
       customerId:f.customerId, supplierId:f.supplierId, employeeId:f.employeeId,
@@ -1823,7 +1889,11 @@ function editTx(tx) {
       note = ` · asset ${linked.id} removed from the register`;
     }
 
-    save(); render(); toast("Updated " + tx.id + note);
+    noteChange("change", "transactions", tx, fieldsChanged(before, tx),
+               `${tx.type} ${fmt(rawAmount(tx))} ${txCurrency(tx)}`);
+    save(); render(); toast("Updated " + tx.id + note
+      + (approvalOn() && newStatus === PENDING && was.status === "Approved"
+         ? " · it goes back to waiting for approval" : ""));
   });
 }
 
@@ -1883,10 +1953,80 @@ function ledgerSearch(list, q) {
    recorded on whatever they pass, because "who said this was right" is the
    question an approval exists to answer. */
 function approveTx(tx) {
+  const from = tx.status;
   tx.status = "Approved";
   tx.approvedBy = (USER && USER.nameEn) || "";
   tx.approvedAt = new Date().toISOString();
   tx.updatedAt = tx.approvedAt;
+  noteChange("approve", "transactions", tx, [{ f:"status", from:from, to:"Approved" }],
+             `${tx.type} ${fmt(rawAmount(tx))} ${txCurrency(tx)}`);
+}
+
+/* Reading the history. One line per change, newest first, with the old value
+   beside the new — the shape of the answer to "who made it that, and when". */
+let histQ = "";
+function viewHistory(m) {
+  pageHead(m, "History", "Every change to the money and to the records it is filed against",
+    [{ label:"Export CSV", on:exportHistoryCsv }]);
+
+  const bar = el("div", { class:"toolbar noprint" });
+  bar.appendChild(fld("Search | بحث",
+    `<input id="h_q" value="${esc(histQ)}" placeholder="a record, a person, a field…" style="min-width:16rem">`));
+  const go_ = el("button", { class:"btn sm" }, "Apply");
+  const run = () => { histQ = ($("#h_q").value || "").trim().toLowerCase(); render(); };
+  go_.onclick = run;
+  bar.appendChild(go_);
+  m.appendChild(bar);
+  const box = $("#h_q");
+  if (box) { box.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); run(); } };
+             if (histQ) { box.focus(); box.setSelectionRange(box.value.length, box.value.length); } }
+
+  const all = (DB.audit || []).slice().sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  const hay = a => [a.at, a.by, a.action, a.table, a.recId, a.label,
+                    ...(a.changes || []).map(c => `${c.f} ${c.from} ${c.to}`)]
+                   .join(" ").toLowerCase();
+  const list = histQ ? all.filter(a => histQ.split(/\s+/).every(w => hay(a).includes(w))) : all;
+
+  if (!all.length) {
+    m.appendChild(el("div", { class:"card" }, `<div class="empty">
+      Nothing has been changed since the history began. Changes made from here on are recorded.</div>`));
+    return;
+  }
+  m.appendChild(el("div", { class:"card-note", style:"margin:-.4rem 0 .6rem" },
+    histQ ? `${list.length} of ${all.length} changes match “${esc(histQ)}”`
+          : `${all.length} changes recorded`));
+
+  const WORD = { create:"added", change:"changed", delete:"deleted",
+                 approve:"approved", setting:"setting" };
+  const rows = list.slice(0, 500).map(a => `<tr>
+    <td>${esc((a.at || "").slice(0, 16).replace("T", " "))}</td>
+    <td>${esc(a.by || "")}</td>
+    <td>${esc(WORD[a.action] || a.action)}</td>
+    <td>${esc(a.recId || "")}${a.label ? `<br><small class="card-note">${esc(a.label)}</small>` : ""}</td>
+    <td>${(a.changes || []).length
+      ? (a.changes || []).map(c =>
+          `<div><b>${esc(c.f)}</b>: ${esc(c.from || "—")} → ${esc(c.to || "—")}</div>`).join("")
+      : "<span class=\"card-note\">—</span>"}</td></tr>`).join("");
+  const w = el("div", { class:"tablewrap" });
+  w.innerHTML = `<table><thead><tr>
+    <th>When</th><th>Who</th><th>What</th><th>Record</th><th>Changed</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+  m.appendChild(w);
+  if (list.length > 500)
+    m.appendChild(el("div", { class:"card-note" },
+      `Showing the newest 500 of ${list.length}. Search to narrow it, or export the lot.`));
+}
+
+function exportHistoryCsv() {
+  const cols = ["at","by","action","table","recId","label","field","from","to"];
+  const lines = [];
+  (DB.audit || []).slice().sort((a, b) => (b.at || "").localeCompare(a.at || "")).forEach(a => {
+    const base = [a.at, a.by, a.action, a.table, a.recId, a.label];
+    if (!(a.changes || []).length) lines.push(base.concat(["", "", ""]).map(csvCell).join(","));
+    else (a.changes || []).forEach(c =>
+      lines.push(base.concat([c.f, c.from, c.to]).map(csvCell).join(",")));
+  });
+  saveFile(`environmsafe-history-${today()}.csv`, cols.join(",") + "\n" + lines.join("\n"), "text/csv");
 }
 
 function viewApprovals(m) {
@@ -2104,7 +2244,12 @@ function viewMaster(m, tbl) {
     if (!canEdit()) return toast("Your role is read-only.");
     const used = DB.transactions.some(x => Object.values(x).includes(b.dataset.d));
     if (used) return toast("Cannot delete — this record is used in transactions.");
-    if (confirm("Delete this record?")) { DB[tbl] = rowsOf(tbl).filter(r => r.id !== b.dataset.d); save(); render(); }
+    if (confirm("Delete this record?")) {
+      const gone = byId(tbl, b.dataset.d);
+      if (gone) noteChange("delete", tbl, gone,
+        fieldsChanged(gone, null).filter(c => !["pw","salt"].includes(c.f)));
+      DB[tbl] = rowsOf(tbl).filter(r => r.id !== b.dataset.d); save(); render();
+    }
   });
   m.appendChild(wrap);
 }
@@ -2129,6 +2274,9 @@ function editMaster(tbl, id, onDone) {
     }
     const password = vals.password; delete vals.password;
     let created = null;
+    // Renaming a project or a customer changes what every report about it says,
+    // so these are recorded exactly as money is.
+    const before = rec ? JSON.parse(JSON.stringify(rec)) : null;
     if (rec) { Object.assign(rec, vals, { updatedAt:now }); }
     else {
       const row = Object.assign({ id:nextId(S.prefix), createdAt:now, updatedAt:now }, vals);
@@ -2141,6 +2289,11 @@ function editMaster(tbl, id, onDone) {
       DB[tbl].push(row);
       created = row;
     }
+    // A password never reaches the history, in any form.
+    const hide = ["pw", "salt"];
+    if (rec) noteChange("change", tbl, rec,
+                        fieldsChanged(before, rec).filter(c => !hide.includes(c.f)));
+    else if (created) noteChange("create", tbl, created, []);
     save();
     // Called from a list inside a half-finished form: redrawing the page here
     // would throw that form away, which is the very thing this avoids.
@@ -3888,7 +4041,12 @@ function viewCompany(m) {
   form.onsubmit = e => {
     e.preventDefault();
     const vals = Object.fromEntries(new FormData(form).entries());
+    /* Whether entries must be approved decides what the whole book counts, so
+       it is recorded like any other change to the money. */
+    const wasCo = Object.assign({}, CO());
     DB.meta.company = Object.assign({}, DB.meta.company, vals);
+    noteChange("setting", "company", { id:"COMPANY" },
+               fieldsChanged(wasCo, CO()).filter(c => c.f !== "logo"), "Company profile");
     save(); applyChrome(); render(); toast("Company profile saved");
   };
   card.appendChild(form);
