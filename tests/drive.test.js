@@ -111,6 +111,60 @@ module.exports = { name: 'drive backup', run: async (ctx) => {
   ctx.check('and is attempted where Google has already let us in',
             await autoTried() === true);
 
+  /* The wrong kind of client is the one failure Google explains worst. It
+     answers "Access blocked: Authorization Error" and nothing else, and the
+     field everyone is told to fix does not exist on a Desktop client. The
+     screen has to say so, and the id has to be changeable without turning the
+     whole backup off first. */
+  // The card on screen was drawn before the client id existed; ask for a fresh one.
+  await pg.evaluate(() => render());
+  await pg.waitForTimeout(500);
+  const standing = await pg.evaluate(() => {
+    const card = [...document.querySelectorAll('.card')]
+      .find(c => /Copy to Google Drive/.test((c.querySelector('h2') || {}).textContent || ''));
+    return card ? card.textContent.replace(/\s+/g, ' ') : '';
+  });
+  ctx.check('the card names the kind of client Google needs',
+            /Web application/.test(standing) && /Desktop/.test(standing), standing.slice(0, 200));
+  ctx.check('and the address to allow, exactly as Google wants it',
+            standing.includes(await pg.evaluate(() => location.origin)), standing.slice(0, 200));
+
+  const hasEdit = await pg.locator('button:has-text("Change the client id")').count();
+  ctx.check('the client id can be changed without stopping the backup', hasEdit === 1);
+
+  await pg.locator('button:has-text("Change the client id")').click();
+  await pg.waitForTimeout(400);
+  const form = await pg.evaluate(() => {
+    const i = document.querySelector('#dr_id');
+    const card = [...document.querySelectorAll('.card')]
+      .find(c => /Copy to Google Drive/.test((c.querySelector('h2') || {}).textContent || ''));
+    return { filled: i ? i.value : null, says: card ? card.textContent.replace(/\s+/g,' ') : '' };
+  });
+  ctx.check('it opens on the id already in use, not blank',
+            form.filled === 'test.apps.googleusercontent.com', String(form.filled));
+  ctx.check('and repeats what kind of client it has to be',
+            /must be .Web application./.test(form.says), form.says.slice(0, 260));
+
+  /* A grant belongs to the client it was issued to. Asking Google again under
+     the new one is the only way to know the new one works — carrying the old
+     token over would look like success and fail on the next real call. */
+  await pg.evaluate(() => {
+    window.__grants = 0;
+    window.google = { accounts: { oauth2: { initTokenClient: cfg => ({
+      requestAccessToken: () => { window.__grants++;
+        cfg.callback({ access_token: 'GRANTED-AGAIN', expires_in: 3600 }); }
+    }) } } };
+  });
+  await pg.evaluate(() => { document.querySelector('#dr_id').value = 'client-999.apps.googleusercontent.com'; });
+  await pg.locator('button:has-text("Save and connect")').click();
+  await pg.waitForTimeout(900);
+  const swapped = await pg.evaluate(() => ({ id: driveClientId(), token: DRIVE.token,
+                                             grants: window.__grants }));
+  ctx.check('saving a different id takes effect',
+            swapped.id === 'client-999.apps.googleusercontent.com', swapped.id);
+  ctx.check('and the grant held for the old client is not carried over',
+            swapped.grants === 1 && swapped.token === 'GRANTED-AGAIN', JSON.stringify(swapped));
+
   ctx.check('no uncaught errors', pg.errors.length === 0, pg.errors.slice(0,2).join(' | '));
   await pg.ctx.close();
 }};

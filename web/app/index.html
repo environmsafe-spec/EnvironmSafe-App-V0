@@ -2065,7 +2065,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.21.0";
+const APP_VERSION = "1.22.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -5315,6 +5315,46 @@ function driveMessage(e) {
 }
 
 /** The Google Drive card on Backup & sync. */
+/* Which client id, and what kind it has to be.
+
+   Google offers several kinds of OAuth client and only one of them can let a
+   web page in: "Web application". A Desktop client has no Authorised
+   JavaScript origins field at all — there is nothing to add to it, and Google
+   answers a browser asking with "Access blocked: Authorization Error" and no
+   explanation. That is an hour of anyone's evening, so the screen says it. */
+function clientIdForm(done, current) {
+  const wrap = el("div");
+  wrap.appendChild(el("p", { class:"card-note", style:"margin:.2rem 0 .5rem" },
+    "Paste the company's Google client id. It is created once in the Google Cloud console "
+    + "(APIs &amp; Services → Credentials → Create credentials → OAuth client ID) and then "
+    + "applies to every device.<br><b>The application type must be “Web application”.</b> "
+    + "A Desktop client cannot let a web page in and has no origins to add. Under "
+    + "<b>Authorised JavaScript origins</b>, add exactly:<br><code>" + esc(driveOrigin())
+    + "</code><br>The Google Drive API must also be enabled for that project."));
+  const g = el("div", { class:"grid" });
+  g.appendChild(fld("Google client id",
+    `<input type="text" id="dr_id" value="${esc(current || "")}" placeholder="…apps.googleusercontent.com">`));
+  wrap.appendChild(g);
+  const b = el("button", { class:"btn gold", style:"margin-top:.5rem" }, "Save and connect");
+  b.onclick = async () => {
+    const v = ($("#dr_id").value || "").trim();
+    if (!v) return toast("Paste the client id first.");
+    if (!isAdmin()) return toast("Only an Administrator can set this up.");
+    if (v === current) return toast("That is the client id already in use.");
+    DB.meta.driveClientId = v;
+    // A different client means the grant already held is no longer ours to use.
+    DRIVE = blankDrive(); driveSave();
+    save();
+    b.disabled = true;
+    const r = await driveBackup(false);
+    b.disabled = false;
+    done();
+    if (r) render();
+  };
+  wrap.appendChild(b);
+  return wrap;
+}
+
 function driveCard(m) {
   const c = el("div", { class:"card" });
   c.appendChild(el("h2", {}, "Copy to Google Drive"));
@@ -5328,25 +5368,7 @@ function driveCard(m) {
   const draw = () => {
     box.innerHTML = "";
     if (!driveSetUp()) {
-      box.appendChild(el("p", { class:"card-note", style:"margin:.2rem 0 .5rem" },
-        "To switch this on, paste the Google client id for the company. It is created once, "
-        + "in the Google Cloud console, and then applies to every device."));
-      const g = el("div", { class:"grid" });
-      g.appendChild(fld("Google client id", '<input type="text" id="dr_id" placeholder="…apps.googleusercontent.com">'));
-      box.appendChild(g);
-      const b = el("button", { class:"btn gold", style:"margin-top:.5rem" }, "Save and connect");
-      b.onclick = async () => {
-        const v = ($("#dr_id").value || "").trim();
-        if (!v) return toast("Paste the client id first.");
-        if (!isAdmin()) return toast("Only an Administrator can set this up.");
-        DB.meta.driveClientId = v; save();
-        b.disabled = true;
-        const r = await driveBackup(false);
-        b.disabled = false;
-        draw();
-        if (r) render();
-      };
-      box.appendChild(b);
+      box.appendChild(clientIdForm(draw));
       return;
     }
     const when = DRIVE.lastAt ? new Date(DRIVE.lastAt).toLocaleString() : "not yet";
@@ -5359,10 +5381,11 @@ function driveCard(m) {
        presses anything. */
     box.appendChild(el("p", { class:"card-note", style:"margin:.2rem 0 .6rem" },
       'This system is at <b>' + esc(driveOrigin()) + '</b>. If Google answers '
-      + '"Access blocked: Authorization Error", that address is missing from the '
-      + "OAuth client's <b>Authorised JavaScript origins</b> — add it in the Google "
-      + "Cloud console under APIs &amp; Services → Credentials, and it will work again. "
-      + "Nothing in the books needs to change."));
+      + '"Access blocked: Authorization Error", the client is either the wrong kind — '
+      + 'it must be a <b>Web application</b> client, not a Desktop one — or this address '
+      + "is missing from its <b>Authorised JavaScript origins</b>. Both are settings in "
+      + "the Google Cloud console, under APIs &amp; Services → Credentials. Nothing in "
+      + "the books needs to change."));
     const bar = el("div", { style:"display:flex;gap:.5rem;flex-wrap:wrap" });
     const bNow = el("button", { class:"btn gold" }, "Copy to Drive now");
     bNow.onclick = async () => {
@@ -5370,6 +5393,15 @@ function driveCard(m) {
       await driveBackup(false);
       bNow.disabled = false; bNow.textContent = "Copy to Drive now";
       draw();
+    };
+    const bEdit = el("button", { class:"btn ghost" }, "Change the client id");
+    bEdit.onclick = () => {
+      if (!isAdmin()) return toast("Only an Administrator can change this.");
+      box.innerHTML = "";
+      box.appendChild(clientIdForm(draw, driveClientId()));
+      const back = el("button", { class:"btn ghost sm", style:"margin-top:.5rem" }, "Cancel");
+      back.onclick = draw;
+      box.appendChild(back);
     };
     const bOff = el("button", { class:"btn ghost" }, "Stop copying");
     bOff.onclick = () => {
@@ -5379,7 +5411,7 @@ function driveCard(m) {
       DRIVE = blankDrive(); driveSave();
       draw(); toast("Copying to Drive is off. Nothing already in Drive was removed.");
     };
-    bar.appendChild(bNow); bar.appendChild(bOff);
+    bar.appendChild(bNow); bar.appendChild(bEdit); bar.appendChild(bOff);
     box.appendChild(bar);
   };
   draw();
