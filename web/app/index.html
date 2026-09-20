@@ -606,6 +606,9 @@ const $ = s => document.querySelector(s);
 const el = (tag, attrs = {}, html = "") => { const n = document.createElement(tag); Object.entries(attrs).forEach(([k,v]) => n.setAttribute(k,v)); if (html) n.innerHTML = html; return n; };
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const num = v => { const n = parseFloat(v); return isFinite(n) ? n : 0; };
+/* Money compared after arithmetic needs the fractions settled, or 0.1 + 0.2
+   refuses to equal 0.3 and a fully settled invoice stays a cent open. */
+const round2 = v => Math.round((num(v) + Number.EPSILON) * 100) / 100;
 const fmt = v => num(v).toLocaleString("en-US", { minimumFractionDigits:2, maximumFractionDigits:2 });
 const fmt0 = v => Math.round(num(v)).toLocaleString("en-US");
 const today = () => new Date().toISOString().slice(0,10);
@@ -747,6 +750,91 @@ const rawAmount = tx => num(tx.debit) + num(tx.credit);
    a document must always show the money that actually changed hands. */
 const amountOf  = tx => FX_ON ? toUsd(rawAmount(tx), txCurrency(tx), tx.fxRate) : rawAmount(tx);
 const live      = tx => tx.status !== "Cancelled";
+
+/* =========================================================================
+   Settling documents — which invoice a payment actually pays.
+
+   A receipt that is only subtracted from a grand total answers "how much is
+   owed" and nothing else. It cannot say which invoice is still open, or how
+   long it has been open, so nobody can chase a debt or tell a customer what
+   their money was put against. A payment therefore carries what it was applied
+   to: `applied` is a list of { uid, amount } naming the documents it settles.
+   Money may be received without being applied yet — that is a real situation,
+   not an error — so what is unapplied is reported rather than forbidden.
+   ========================================================================= */
+
+const allocOf     = tx => (tx && Array.isArray(tx.applied)) ? tx.applied : [];
+const appliedFrom = tx => sum(allocOf(tx), a => a.amount);
+/** Money on this receipt or payment that has not been put against anything. */
+const unappliedOf = tx => round2(rawAmount(tx) - appliedFrom(tx));
+
+/** What every payment in the book has put against one document. */
+function settledOn(uid, ignoreUid) {
+  let s = 0;
+  DB.transactions.forEach(p => {
+    if (!live(p) || p.uid === ignoreUid) return;
+    allocOf(p).forEach(a => { if (a.uid === uid) s += num(a.amount); });
+  });
+  return round2(s);
+}
+const outstandingOf = (inv, ignoreUid) =>
+  round2(rawAmount(inv) - settledOn(inv.uid, ignoreUid));
+
+/** Is this the kind of document a payment can be put against? */
+const isOpenable = (tx, forCustomer) => forCustomer ? isRevenue(tx) : isBilled(tx);
+/** Is this the kind of row that settles one? */
+const settlesDocs = tx => {
+  const ty = typeOf(tx.type);
+  return !!ty.cash && (ty.party === "customer" || ty.party === "supplier");
+};
+
+/** The documents of one party still carrying a balance, oldest first. */
+function openItemsFor(tbl, partyId, currency, ignoreUid) {
+  if (!partyId) return [];
+  const key = tbl === "customers" ? "customerId" : "supplierId";
+  const forCustomer = tbl === "customers";
+  return DB.transactions
+    .filter(live)
+    .filter(x => x[key] === partyId && isOpenable(x, forCustomer))
+    .filter(x => !currency || txCurrency(x) === currency)
+    .map(x => ({ tx:x, paid:settledOn(x.uid, ignoreUid), out:outstandingOf(x, ignoreUid) }))
+    .filter(r => r.out > 0.005)
+    .sort((a, b) => inOrder(a.tx.date + a.tx.id, b.tx.date + b.tx.id));
+}
+
+/* How late a debt is, counted from the document's own date. The buckets are the
+   ones every statement uses, so a reader coming from another system reads this
+   one without being taught it. */
+const AGE_BUCKETS = ["Current", "1–30", "31–60", "61–90", "Over 90"];
+function ageBucket(dateStr, asOf) {
+  const days = Math.floor((Date.parse(asOf || today()) - Date.parse(dateStr)) / 86400000);
+  if (!isFinite(days) || days <= 0) return AGE_BUCKETS[0];
+  if (days <= 30) return AGE_BUCKETS[1];
+  if (days <= 60) return AGE_BUCKETS[2];
+  if (days <= 90) return AGE_BUCKETS[3];
+  return AGE_BUCKETS[4];
+}
+
+/* Applying money is arithmetic the office should never have to check by hand:
+   a payment cannot settle more than it is worth, and a document cannot be
+   settled past what it is worth. Both are refused with the figure that is
+   wrong, not a general complaint. */
+function allocationProblem(tx, rows) {
+  const total = round2(sum(rows, r => r.amount));
+  const worth = rawAmount(tx);
+  if (total - worth > 0.005)
+    return `Applied ${fmt(total)} of a ${fmt(worth)} ${tx.type.toLowerCase()} — ` +
+           `that is ${fmt(total - worth)} more than the payment is worth.`;
+  for (const r of rows) {
+    if (num(r.amount) < 0) return "An applied amount cannot be negative.";
+    const inv = DB.transactions.find(x => x.uid === r.uid);
+    if (!inv) continue;
+    const room = outstandingOf(inv, tx.uid);
+    if (num(r.amount) - room > 0.005)
+      return `${inv.id} has only ${fmt(room)} still open — ${fmt(r.amount)} cannot be applied to it.`;
+  }
+  return "";
+}
 
 /* ---------- currency ----------
    Money is never added across currencies. Every row carries the currency of the
@@ -1469,7 +1557,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.9.5";
+const APP_VERSION = "1.10.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -1538,13 +1626,16 @@ function txTable(list, opts = {}) {
     <td>${esc(nameOf("customers",tx.customerId) || nameOf("suppliers",tx.supplierId) || nameOf("employees",tx.employeeId) || "")}</td>
     <td>${esc(nameOf("projects",tx.projectId))}</td>
     <td>${esc(nameOf("accounts",tx.accountId))}</td>
-    <td>${esc(txCurrency(tx))}</td>
+    <td>${esc(txCurrency(tx))}${settlesDocs(tx) && unappliedOf(tx) > 0.005
+      ? ` <small class="card-note">${fmt(unappliedOf(tx))} unapplied</small>` : ""}</td>
     <td class="num">${num(tx.debit) ? fmt(tx.debit) : ""}</td>
     <td class="num">${num(tx.credit) ? fmt(tx.credit) : ""}</td>
     <td><span class="pill ${esc((tx.status||"draft").toLowerCase())}">${esc(tx.status)}</span></td>
     <td>${esc(tx.refNo || "")}</td><td>${esc(tx.docRef || "")}</td>
     <td class="noprint"><div class="rowactions">
       ${tx.refNo ? `<button class="linkbtn" data-act="doc" data-ref="${esc(tx.refNo)}">Form</button>` : ""}
+      ${settlesDocs(tx) ? `<button class="linkbtn" data-act="apply" data-id="${esc(tx.id)}">${
+        unappliedOf(tx) > 0.005 ? "Apply" : "Applied"}</button>` : ""}
       <button class="linkbtn" data-act="edit" data-id="${esc(tx.id)}">${esc(t("edit"))}</button>
       <button class="linkbtn" data-act="del" data-id="${esc(tx.id)}">${esc(t("del"))}</button>
     </div></td></tr>`).join("");
@@ -1571,6 +1662,7 @@ function txTable(list, opts = {}) {
       if (b.dataset.act === "doc") { rep.doc = b.dataset.ref; return go("r_document"); }
       const tx = DB.transactions.find(x => x.id === b.dataset.id);
       if (!tx) return;
+      if (b.dataset.act === "apply") return applyToDocs(tx);
       if (b.dataset.act === "del") {
         if (!canEdit()) return toast("Your role is read-only.");
         if (confirm(`Delete ${tx.id}?`)) {
@@ -2243,6 +2335,123 @@ function footRow(cols, leadCount, sums) {
 /* Tick as many as you like, or none for all of them. With sixty-nine projects
    and thirty-eight people a list alone is not usable, so it searches, and All
    and None are one click. */
+/* Putting a receipt against the invoices it pays. The oldest open document is
+   offered first, because that is the order money is normally meant to settle
+   in, and "Apply oldest first" fills the boxes that way in one press — but
+   every box stays editable, because a customer who says "this is for the June
+   invoice" is telling you something the arithmetic cannot know. */
+function applyToDocs(tx, onDone) {
+  const forCustomer = typeOf(tx.type).party === "customer";
+  const tbl = forCustomer ? "customers" : "suppliers";
+  const partyId = forCustomer ? tx.customerId : tx.supplierId;
+  if (!partyId)
+    return toast(`Choose the ${forCustomer ? "customer" : "supplier"} first, then apply the money.`);
+
+  const cur = txCurrency(tx);
+  const items = openItemsFor(tbl, partyId, cur, tx.uid);
+  // Anything already applied stays on the list even when nothing is left open,
+  // so money can be taken back off a document as easily as it was put on.
+  const already = new Map(allocOf(tx).map(a => [a.uid, num(a.amount)]));
+  already.forEach((amt, uid) => {
+    if (items.some(r => r.tx.uid === uid)) return;
+    const inv = DB.transactions.find(x => x.uid === uid);
+    if (inv) items.push({ tx:inv, paid:settledOn(uid, tx.uid), out:0 });
+  });
+
+  const bg = el("div", { class:"modal-bg" });
+  const box = el("div", { class:"modal", style:"width:min(680px,100%)" });
+  box.appendChild(el("h2", {}, `Apply ${esc(tx.id)} — ${fmt(rawAmount(tx))} ${esc(cur)}`));
+  box.appendChild(el("p", { class:"card-note" },
+    `What is this money for? ${esc(nameOf(tbl, partyId))} · money left over stays unapplied, which is fine.`));
+
+  if (!items.length) {
+    box.appendChild(el("div", { class:"empty" },
+      `Nothing of ${esc(nameOf(tbl, partyId))}'s is open in ${esc(cur)}.`));
+  }
+
+  const boxes = new Map();
+  const tally = el("div", { class:"card-note", style:"margin-top:.5rem;font-weight:700" });
+  const retotal = () => {
+    let used = 0;
+    boxes.forEach(inp => used += num(inp.value));
+    const left = round2(rawAmount(tx) - used);
+    tally.textContent = `Applied ${fmt(used)} · left to apply ${fmt(left)} ${cur}`;
+    tally.style.color = left < -0.005 ? "var(--s-crit)" : "";
+  };
+
+  if (items.length) {
+    const wrap = el("div", { class:"tablewrap", style:"max-height:46vh;overflow:auto" });
+    const rows = items.map(r => {
+      const pre = already.get(r.tx.uid) || 0;
+      return `<tr>
+        <td>${esc(r.tx.id)}</td><td>${esc(r.tx.date)}</td>
+        <td>${esc(r.tx.refNo || "")}</td>
+        <td class="num">${fmt(rawAmount(r.tx))}</td>
+        <td class="num">${fmt(r.paid)}</td>
+        <td class="num">${fmt(round2(r.out + pre))}</td>
+        <td><input type="number" step="0.01" min="0" data-uid="${esc(r.tx.uid)}"
+             value="${pre ? pre : ""}" style="width:7rem"></td></tr>`;
+    }).join("");
+    wrap.innerHTML = `<table><thead><tr>
+      <th>Document</th><th>${esc(t("date"))}</th><th>${esc(t("ref"))}</th>
+      <th class="num">Amount</th><th class="num">Already paid</th>
+      <th class="num">Still open</th><th>Apply</th></tr></thead><tbody>${rows}</tbody></table>`;
+    wrap.querySelectorAll("input[data-uid]").forEach(inp => {
+      boxes.set(inp.dataset.uid, inp);
+      inp.oninput = retotal;
+    });
+    box.appendChild(wrap);
+
+    const bar = el("div", { style:"display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap" });
+    const oldest = el("button", { class:"btn ghost sm", type:"button" }, "Apply oldest first");
+    oldest.onclick = () => {
+      let left = rawAmount(tx);
+      items.forEach(r => {
+        const room = round2(r.out + (already.get(r.tx.uid) || 0));
+        const put = Math.max(0, Math.min(room, left));
+        const inp = boxes.get(r.tx.uid);
+        if (inp) inp.value = put ? put : "";
+        left = round2(left - put);
+      });
+      retotal();
+    };
+    const clear = el("button", { class:"btn ghost sm", type:"button" }, "Clear");
+    clear.onclick = () => { boxes.forEach(i => i.value = ""); retotal(); };
+    bar.appendChild(oldest); bar.appendChild(clear);
+    box.appendChild(bar);
+  }
+
+  box.appendChild(tally);
+  retotal();
+
+  const act = el("div", { class:"actions" });
+  const cancel = el("button", { class:"btn ghost", type:"button" }, t("cancel"));
+  cancel.onclick = () => bg.remove();
+  const save_ = el("button", { class:"btn gold", type:"button" }, t("save"));
+  save_.onclick = () => {
+    if (!canEdit()) return toast("Your role is read-only.");
+    const rows = [];
+    boxes.forEach((inp, uid) => { const a = round2(inp.value); if (a > 0) rows.push({ uid, amount:a }); });
+    const bad = allocationProblem(tx, rows);
+    if (bad) return toast(bad);
+    tx.applied = rows;
+    tx.updatedAt = new Date().toISOString();
+    save();
+    bg.remove();
+    const left = unappliedOf(tx);
+    toast(rows.length
+      ? `${tx.id} applied to ${rows.length} document${rows.length > 1 ? "s" : ""}` +
+        (left > 0.005 ? ` · ${fmt(left)} ${cur} left unapplied` : "")
+      : `${tx.id} is no longer applied to anything`);
+    if (onDone) onDone(); else render();
+  };
+  act.appendChild(cancel); act.appendChild(save_);
+  box.appendChild(act);
+  bg.appendChild(box);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  document.body.appendChild(bg);
+}
+
 function openMultiPick(dim, onApply) {
   const d = SEL_DIMS[dim];
   const opts = selOptions(dim);
@@ -3146,6 +3355,50 @@ function perCurrency(m, draw) {
   });
 }
 
+/* A balance says how much is owed. It does not say which document is still
+   open, or how long it has been open — and those are the two things anyone
+   chasing a debt actually needs. This lists what is unsettled, oldest first,
+   with each amount in the column for how late it is. */
+function openItemsCard(card, tbl, partyId, currency) {
+  const items = openItemsFor(tbl, partyId, currency);
+  const asOf = rep.to || today();
+  if (!items.length) return;
+
+  const totals = {};
+  AGE_BUCKETS.forEach(b => totals[b] = 0);
+  const rows = items.map(r => {
+    const b = ageBucket(r.tx.date, asOf);
+    totals[b] += r.out;
+    return `<tr><td>${esc(r.tx.id)}</td><td>${esc(r.tx.date)}</td>
+      <td>${esc(r.tx.refNo || "")}</td>
+      <td>${esc(nameOf("projects", r.tx.projectId))}</td>
+      <td class="num">${fmt(rawAmount(r.tx))}</td>
+      <td class="num">${r.paid ? fmt(r.paid) : ""}</td>
+      <td class="num">${fmt(r.out)}</td>
+      <td>${esc(b)}</td></tr>`;
+  }).join("");
+
+  const wrap = el("div", { class:"tablewrap", style:"margin-top:.8rem" });
+  wrap.innerHTML = `<table><thead><tr>
+      <th>Open document</th><th>${esc(t("date"))}</th><th>${esc(t("ref"))}</th><th>Project</th>
+      <th class="num">Amount</th><th class="num">Paid</th>
+      <th class="num">Still open</th><th>Age</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="6">${esc(t("total"))} still open</td>
+      <td class="num">${fmt(sum(items, r => r.out))}</td><td></td></tr></tfoot></table>`;
+
+  card.appendChild(el("h3", { style:"margin:.9rem 0 .2rem" },
+    "Still open" + (currency ? " — " + esc(currency) : "")));
+  card.appendChild(wrap);
+
+  const aged = el("div", { class:"tablewrap", style:"margin-top:.5rem" });
+  aged.innerHTML = `<table><thead><tr>${
+      AGE_BUCKETS.map(b => `<th class="num">${esc(b)}</th>`).join("")}</tr></thead>
+    <tbody><tr>${AGE_BUCKETS.map(b =>
+      `<td class="num">${totals[b] ? fmt(totals[b]) : ""}</td>`).join("")}</tr></tbody></table>`;
+  card.appendChild(aged);
+}
+
 function repParty(m, tbl) { perCurrency(m, mm => repPartyOne(mm, tbl)); }
 function repPartyOne(m, tbl) {
   const isCus = tbl === "customers";
@@ -3214,6 +3467,7 @@ function repPartyOne(m, tbl) {
       <tbody>${openingRow}${body || ""}</tbody>
       <tfoot>${closeRow}</tfoot></table>`;
     card.appendChild(w);
+    openItemsCard(card, tbl, p.id, CUR && CUR !== FXV ? CUR : "");
     m.appendChild(card);
   });
 }
