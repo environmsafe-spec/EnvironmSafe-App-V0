@@ -75,6 +75,8 @@
   /* Work that has not reached the cloud yet must be visible from every screen.
      Entries sat unsent on one phone for two days with nothing on the screen to
      say so, and looked lost from everywhere else. */
+  .pend-dot { background:var(--gold); color:#131A2A; border-radius:999px;
+    padding:0 .4rem; font-size:.72rem; margin-inline-start:.35rem; }
   .pend { background:var(--gold) !important; color:#131A2A !important;
     border:1px solid var(--gold) !important; font-weight:700; }
   .pend.bad { background:#C0392B !important; border-color:#C0392B !important; color:#fff !important; }
@@ -474,7 +476,8 @@ const SCHEMAS = {
 
 const T = {
   dashboard:["Dashboard","لوحة المعلومات"], daily:["Daily entry","الإدخال اليومي"],
-  ledger:["Transactions","الحركات"], cases:["Procurement files","ملفات المشتريات"],
+  ledger:["Transactions","الحركات"], approvals:["Approvals","الاعتمادات"],
+  cases:["Procurement files","ملفات المشتريات"],
   masters:["Master data","البيانات الأساسية"], reports:["Reports","التقارير"],
   data:["Backup & sync","النسخ والمزامنة"], users:["Users","المستخدمون"],
   items:["Products & services","المنتجات والخدمات"], assets:["Fixed assets","الأصول الثابتة"], deposits:["Deposits held","ضمانات لدى الغير"],
@@ -752,6 +755,29 @@ const amountOf  = tx => FX_ON ? toUsd(rawAmount(tx), txCurrency(tx), tx.fxRate) 
 const live      = tx => tx.status !== "Cancelled";
 
 /* =========================================================================
+   Approval — entries waiting for the people who answer for the numbers.
+
+   A status that changes nothing is a label, not a control: until now an entry
+   marked Draft counted in every total exactly as an approved one did, so
+   "approved" said nothing about whether anyone had looked. With approval
+   turned on, an entry that is still waiting does not count anywhere money is
+   counted — that is the whole point of waiting. It stays plainly visible in
+   the ledger, marked as waiting, because an entry nobody can see is an entry
+   nobody will ever approve.
+
+   It is off until the company turns it on, and deliberately so: switching it
+   on decides that everything currently unapproved stops counting, and that is
+   a decision for the office, on a day of its choosing, not a surprise.
+   ========================================================================= */
+
+const PENDING    = "Draft";
+const approvalOn = () => CO().requireApproval === "Yes";
+const isPending  = tx => approvalOn() && tx.status === PENDING;
+/** What the books count: never a cancelled row, and never one still waiting. */
+const counted    = tx => live(tx) && !isPending(tx);
+const pendingTxs = () => DB.transactions.filter(x => live(x) && x.status === PENDING);
+
+/* =========================================================================
    Settling documents — which invoice a payment actually pays.
 
    A receipt that is only subtracted from a grand total answers "how much is
@@ -772,7 +798,7 @@ const unappliedOf = tx => round2(rawAmount(tx) - appliedFrom(tx));
 function settledOn(uid, ignoreUid) {
   let s = 0;
   DB.transactions.forEach(p => {
-    if (!live(p) || p.uid === ignoreUid) return;
+    if (!counted(p) || p.uid === ignoreUid) return;
     allocOf(p).forEach(a => { if (a.uid === uid) s += num(a.amount); });
   });
   return round2(s);
@@ -794,7 +820,7 @@ function openItemsFor(tbl, partyId, currency, ignoreUid) {
   const key = tbl === "customers" ? "customerId" : "supplierId";
   const forCustomer = tbl === "customers";
   return DB.transactions
-    .filter(live)
+    .filter(counted)
     .filter(x => x[key] === partyId && isOpenable(x, forCustomer))
     .filter(x => !currency || txCurrency(x) === currency)
     .map(x => ({ tx:x, paid:settledOn(x.uid, ignoreUid), out:outstandingOf(x, ignoreUid) }))
@@ -905,7 +931,9 @@ function txs(filter = {}) {
   let cur = filter.currency !== undefined ? filter.currency : CUR;
   if (cur === FXV) cur = "";              // the converted view spans every currency
   return DB.transactions
-    .filter(live)
+    // The ledger and the approval queue ask for what is waiting as well; every
+    // other screen is about money, and money that is waiting does not count.
+    .filter(filter.includePending ? live : counted)
     .filter(tx => !cur || txCurrency(tx) === cur)
     .filter(tx => inRange(tx, filter.from, filter.to))
     .filter(tx => !filter.customerId || tx.customerId === filter.customerId)
@@ -1014,7 +1042,8 @@ const totalAP = () => rowsOf("suppliers").reduce((s,x) => s + supplierBalance(x.
 const NAV = [
   { group:"Operations", items:[
     { id:"dashboard", label:"dashboard" }, { id:"daily", label:"daily" },
-    { id:"ledger", label:"ledger" }, { id:"cases", label:"cases" } ] },
+    { id:"ledger", label:"ledger" }, { id:"approvals", label:"approvals" },
+    { id:"cases", label:"cases" } ] },
   { group:"Master data", items:[
     { id:"m_items", label:"items" }, { id:"m_assets", label:"assets" },
     { id:"m_customers", label:"customers" }, { id:"m_suppliers", label:"suppliers" },
@@ -1038,8 +1067,10 @@ function renderNav() {
     nav.appendChild(el("div", { class:"navlabel" }, esc(g.group)));
     const box = el("div", { class:"navgroup" });
     g.items.filter(it => !it.admin || isAdmin()).forEach(it => {
+      const waiting = it.id === "approvals" && approvalOn() ? pendingTxs().length : 0;
       const b = el("a", { class:"navbtn", href:"#/" + it.id, "data-view":it.id,
-                          "aria-current":String(VIEW === it.id) }, esc(t(it.label)));
+                          "aria-current":String(VIEW === it.id) },
+                   esc(t(it.label)) + (waiting ? ` <b class="pend-dot">${waiting}</b>` : ""));
       box.appendChild(b);
     });
     nav.appendChild(box);
@@ -1077,6 +1108,7 @@ function render() {
   if (VIEW === "dashboard") viewDashboard(m);
   else if (VIEW === "daily") viewDaily(m);
   else if (VIEW === "ledger") viewLedger(m);
+  else if (VIEW === "approvals") viewApprovals(m);
   else if (VIEW === "cases") viewCases(m);
   else if (VIEW.startsWith("m_")) viewMaster(m, VIEW.slice(2));
   else if (VIEW.startsWith("r_")) viewReport(m, VIEW.slice(2));
@@ -1429,9 +1461,14 @@ function viewDaily(m) {
       fxRate:num(f.fxRate),
       debit: ty.side === "debit" ? amount : 0,
       credit: ty.side === "credit" ? amount : 0,
-      status:f.status, refNo:f.refNo, againstRef:f.againstRef, docType:f.docType, docRef:f.docRef, notes:f.notes,
+      // Nobody approves their own entry by choosing it from a list: while
+      // approval is on, an entry arrives waiting unless the person typing it
+      // may approve, and then it is recorded as their approval, by name.
+      status: approvalOn() && !canApprove() ? PENDING : f.status,
+      refNo:f.refNo, againstRef:f.againstRef, docType:f.docType, docRef:f.docRef, notes:f.notes,
       createdBy:(USER ? USER.username : ""), createdAt:now, updatedAt:now
     };
+    if (approvalOn() && tx.status === "Approved") approveTx(tx);
     DB.transactions.push(tx);
     const asset = f.isAsset === "Yes" ? registerAssetFrom(tx, f) : null;
     save();
@@ -1557,7 +1594,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.10.0";
+const APP_VERSION = "1.11.0";
 const APP_BUILD   = "2026-09-13";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -1630,7 +1667,8 @@ function txTable(list, opts = {}) {
       ? ` <small class="card-note">${fmt(unappliedOf(tx))} unapplied</small>` : ""}</td>
     <td class="num">${num(tx.debit) ? fmt(tx.debit) : ""}</td>
     <td class="num">${num(tx.credit) ? fmt(tx.credit) : ""}</td>
-    <td><span class="pill ${esc((tx.status||"draft").toLowerCase())}">${esc(tx.status)}</span></td>
+    <td><span class="pill ${esc((tx.status||"draft").toLowerCase())}">${esc(tx.status)}</span>${
+      isPending(tx) ? ` <small class="card-note">waiting</small>` : ""}</td>
     <td>${esc(tx.refNo || "")}</td><td>${esc(tx.docRef || "")}</td>
     <td class="noprint"><div class="rowactions">
       ${tx.refNo ? `<button class="linkbtn" data-act="doc" data-ref="${esc(tx.refNo)}">Form</button>` : ""}
@@ -1675,7 +1713,11 @@ function txTable(list, opts = {}) {
 }
 
 function editTx(tx) {
-  const was = { isAsset: tx.isAsset, status: tx.status };
+  // Enough of the entry as it stood to tell whether an approval still holds.
+  const was = { isAsset: tx.isAsset, status: tx.status, date: tx.date,
+                amount: rawAmount(tx), customerId: tx.customerId || "",
+                supplierId: tx.supplierId || "", employeeId: tx.employeeId || "",
+                accountId: tx.accountId || "" };
   /* Every field the entry screen offers, so a transaction entered in a hurry —
      or imported from a spreadsheet — can be put right here rather than deleted
      and typed again. The same rules apply on the way out as on the way in: the
@@ -1734,6 +1776,17 @@ function editTx(tx) {
       customerId:f.customerId, supplierId:f.supplierId, employeeId:f.employeeId });
     if (warn && !confirm(warn)) return;
 
+    /* An approval is of a particular entry, not of its number: if the money,
+       the day, the party or the account is changed after it was passed, it has
+       not been approved — so it goes back to waiting and must be passed again.
+       An approver editing it simply approves it again on the spot. */
+    let newStatus = f.status;
+    const moved = was.status === "Approved" && f.status === "Approved" && (
+      num(f.amount) !== was.amount || f.date !== was.date ||
+      f.customerId !== was.customerId || f.supplierId !== was.supplierId ||
+      f.employeeId !== was.employeeId || f.accountId !== was.accountId);
+    if (approvalOn() && moved && !canApprove()) newStatus = PENDING;
+
     // An account holds one currency, so choosing one settles the question.
     const acc = byId("accounts", f.accountId);
     const currency = acc ? (acc.currency || CO().currency || "YER") : (f.currency || tx.currency);
@@ -1746,7 +1799,7 @@ function editTx(tx) {
       isAsset:f.isAsset, currency, fxRate:num(f.fxRate),
       debit:  ty.side === "debit"  ? amount : 0,
       credit: ty.side === "credit" ? amount : 0,
-      status:f.status, refNo:f.refNo, againstRef:f.againstRef,
+      status:newStatus, refNo:f.refNo, againstRef:f.againstRef,
       docType:f.docType, docRef:f.docRef, notes:f.notes,
       updatedAt: new Date().toISOString()
     });
@@ -1825,6 +1878,94 @@ function ledgerSearch(list, q) {
   return list.filter(x => { const hay = txHaystack(x); return terms.every(w => hay.includes(w)); });
 }
 
+/* The queue. Everything waiting, oldest first, with enough of each entry on
+   screen to decide without opening it — and the approver's name and the moment
+   recorded on whatever they pass, because "who said this was right" is the
+   question an approval exists to answer. */
+function approveTx(tx) {
+  tx.status = "Approved";
+  tx.approvedBy = (USER && USER.nameEn) || "";
+  tx.approvedAt = new Date().toISOString();
+  tx.updatedAt = tx.approvedAt;
+}
+
+function viewApprovals(m) {
+  pageHead(m, "Approvals", approvalOn()
+    ? "Entries wait here until an Administrator or Reviewer passes them"
+    : "Approval is off — entries count as soon as they are typed");
+
+  if (!approvalOn()) {
+    m.appendChild(el("div", { class:"card" }, `<div class="empty">
+      Nothing waits for approval while this is off. Turn it on under
+      <b>Company</b> if entries should be checked before they count.</div>`));
+    return;
+  }
+
+  const waiting = pendingTxs().sort((a, b) => inOrder(a.date + a.id, b.date + b.id));
+  if (!waiting.length) {
+    m.appendChild(el("div", { class:"card" },
+      `<div class="empty">Nothing is waiting. Every entry has been approved.</div>`));
+    return;
+  }
+
+  const card = el("div", { class:"card" });
+  card.appendChild(el("h2", {}, `${waiting.length} waiting`));
+  if (!canApprove())
+    card.appendChild(el("p", { class:"card-note" },
+      "Your role can see what is waiting but not pass it. An Administrator or Reviewer approves."));
+
+  const rows = waiting.map(x => `<tr>
+    <td>${esc(x.id)}</td><td>${esc(x.date)}</td><td>${esc(x.type)}</td>
+    <td>${esc(nameOf("customers",x.customerId) || nameOf("suppliers",x.supplierId) ||
+                nameOf("employees",x.employeeId) || "")}</td>
+    <td>${esc(nameOf("projects", x.projectId))}</td>
+    <td>${esc(txCurrency(x))}</td>
+    <td class="num">${fmt(rawAmount(x))}</td>
+    <td>${esc(x.refNo || "")}</td>
+    <td class="noprint"><div class="rowactions">
+      <button class="linkbtn" data-ap="${esc(x.id)}">Approve</button>
+      <button class="linkbtn" data-ed="${esc(x.id)}">${esc(t("edit"))}</button>
+    </div></td></tr>`).join("");
+  const w = el("div", { class:"tablewrap" });
+  w.innerHTML = `<table><thead><tr>
+    <th>ID</th><th>${esc(t("date"))}</th><th>${esc(t("type"))}</th><th>Party</th>
+    <th>Project</th><th>${esc(t("currency"))}</th><th class="num">${esc(t("amount"))}</th>
+    <th>${esc(t("ref"))}</th><th class="noprint"></th></tr></thead><tbody>${rows}</tbody></table>`;
+  w.querySelectorAll("[data-ap]").forEach(b => b.onclick = () => {
+    if (!canApprove()) return toast("Only an Administrator or Reviewer can approve.");
+    const tx = DB.transactions.find(x => x.id === b.dataset.ap);
+    if (!tx) return;
+    approveTx(tx); save(); render();
+    toast(`${tx.id} approved`);
+  });
+  w.querySelectorAll("[data-ed]").forEach(b => b.onclick = () => {
+    const tx = DB.transactions.find(x => x.id === b.dataset.ed);
+    if (tx) editTx(tx);
+  });
+  card.appendChild(w);
+
+  /* Approving two months of entries one press at a time is how a queue stops
+     being used. Passing them together is offered — and says how many, and how
+     much, so it is never a blind press. */
+  if (canApprove()) {
+    const bar = el("div", { style:"margin-top:.8rem;display:flex;gap:.5rem;flex-wrap:wrap" });
+    const all = el("button", { class:"btn gold" }, `Approve all ${waiting.length}`);
+    all.onclick = () => {
+      const per = {};
+      waiting.forEach(x => { const c = txCurrency(x); per[c] = (per[c] || 0) + rawAmount(x); });
+      const money = Object.keys(per).sort().map(c => `${fmt(per[c])} ${c}`).join(", ");
+      if (!confirm(`Approve all ${waiting.length} waiting entries?\n\n${money}\n\n` +
+                   `They start counting in every report as soon as you do.`)) return;
+      waiting.forEach(approveTx);
+      save(); render();
+      toast(`${waiting.length} entries approved`);
+    };
+    bar.appendChild(all);
+    card.appendChild(bar);
+  }
+  m.appendChild(card);
+}
+
 function viewLedger(m) {
   pageHead(m, t("ledger"), "Daily_Transactions — the single source of truth", [
     { label:t("print"), on:() => doPrint("Transactions") },
@@ -1862,7 +2003,8 @@ function viewLedger(m) {
   }
 
   const before = txs({ from:ledgerFilter.from, to:ledgerFilter.to, type:ledgerFilter.type,
-                       status:ledgerFilter.status, currency:ledgerFilter.currency });
+                       status:ledgerFilter.status, currency:ledgerFilter.currency,
+                       includePending:true });
   const list = ledgerSearch(before, ledgerFilter.q);
   if (ledgerFilter.q)
     m.appendChild(el("div", { class:"card-note", style:"margin:-.4rem 0 .6rem" },
@@ -3702,6 +3844,19 @@ function viewCompany(m) {
   const form = el("form");
   const g = el("div", { class:"grid" });
   CO_FIELDS.forEach(f => g.appendChild(fld(f.l, `<input name="${f.k}" value="${esc(c[f.k] || "")}">`)));
+  /* Turning this on decides that everything not yet approved stops counting.
+     It says so plainly, with the number, because that is the whole decision. */
+  const waiting = pendingTxs().length;
+  g.appendChild(fld("Entries must be approved before they count",
+    `<select name="requireApproval">
+       <option value="No" ${c.requireApproval !== "Yes" ? "selected" : ""}>No — an entry counts as soon as it is typed</option>
+       <option value="Yes" ${c.requireApproval === "Yes" ? "selected" : ""}>Yes — an entry waits for an Administrator or Reviewer</option>
+     </select>` +
+    (waiting && c.requireApproval !== "Yes"
+      ? `<div class="card-note" style="color:var(--s-warn)">Turning this on will hold back
+         ${waiting} ${waiting === 1 ? "entry" : "entries"} already typed — they stop counting
+         until approved. They will be waiting for you on the Approvals screen.</div>`
+      : "")));
   form.appendChild(g);
   CO_TEXTAREAS.forEach(f => form.appendChild(fld(f.l,
     `<textarea name="${f.k}" rows="3">${esc(c[f.k] || "")}</textarea>`)));
