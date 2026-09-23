@@ -29,7 +29,7 @@ function startMockSupabase(port, opts) {
       const cors = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
-        'Access-Control-Allow-Headers': 'apikey,authorization,content-type,prefer,x-client-info'
+        'Access-Control-Allow-Headers': 'apikey,authorization,content-type,prefer,x-client-info,x-upsert'
       };
       const send = (code, obj) => {
         res.writeHead(code, Object.assign({ 'Content-Type': 'application/json' }, cors));
@@ -119,6 +119,30 @@ function startMockSupabase(port, opts) {
           }
         }
       }
+      /* ---- Storage: the private attachments bucket ---- */
+      if (u.startsWith('/storage/v1/object/')) {
+        if (!(req.headers.authorization || '').startsWith('Bearer '))
+          return send(401, { message: 'JWT required' });
+        const sign = /^\/storage\/v1\/object\/sign\/([^/]+)\/(.+)$/.exec(u);
+        if (sign && req.method === 'POST') {
+          const key = sign[1] + '/' + decodeURIComponent(sign[2]);
+          if (!srv.objects.has(key)) return send(404, { message: 'Object not found' });
+          return send(200, { signedURL: '/object/sign/' + sign[1] + '/' + sign[2] + '?token=T' });
+        }
+        const obj = /^\/storage\/v1\/object\/([^/]+)\/(.+)$/.exec(u);
+        if (obj) {
+          const key = obj[1] + '/' + decodeURIComponent(obj[2]);
+          if (obj[1] !== 'es-attachments') return send(404, { message: 'Bucket not found' });
+          if (!key.split('/')[1] || key.split('/')[1] !== COMPANY)
+            return send(403, { message: 'new row violates row-level security policy' });
+          if (req.method === 'POST') {
+            if (srv.objects.has(key)) return send(409, { message: 'The resource already exists' });
+            srv.objects.set(key, { type: req.headers['content-type'], size: body.length });
+            return send(200, { Key: key });
+          }
+          if (req.method === 'DELETE') { srv.objects.delete(key); return send(200, [{ name: key }]); }
+        }
+      }
       /* ---- Google Drive, enough of it to exercise the backup ---- */
       if (u.startsWith('/drive/v3/files') || u.startsWith('/upload/drive/v3/files')) {
         if (!(req.headers.authorization || '').startsWith('Bearer '))
@@ -168,6 +192,7 @@ function startMockSupabase(port, opts) {
   srv.counters = Object.create(null);   // prefix -> the next number to hand out
   srv.reserves = 0;
   srv.counterFails = 0;                 // stage this many refusals from the counter
+  srv.objects = new Map();             // bucket/path -> { type, size }
   srv.driveFiles = new Map();
   srv.driveSeq = 0;
   srv.driveFails = 0;
