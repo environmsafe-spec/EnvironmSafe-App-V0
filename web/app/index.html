@@ -1841,6 +1841,10 @@ function viewDaily(m) {
   g.appendChild(fld("Document file / link | المستند", `<input name="docRef" placeholder="quotation-1024.pdf or Drive link">`));
   form.appendChild(g);
   form.appendChild(fld("Notes | ملاحظات", `<textarea name="notes" rows="2"></textarea>`));
+  form.appendChild(fld("Attached document note | ملاحظة المستند المرفق",
+    `<textarea name="attachNote" rows="2" placeholder="what the attached paperwork says: bank note, accounts, fees, payee"></textarea>`));
+  form.appendChild(fld("Attach files — photos, PDF, documents | إرفاق ملفات",
+    `<input type="file" name="attachFiles" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt">`));
 
   const bar = el("div", { class:"actions", style:"display:flex;gap:.5rem;margin-top:.9rem" });
   const submit = el("button", { class:"btn gold", type:"submit" }, t("save"));
@@ -1905,11 +1909,15 @@ function viewDaily(m) {
     e.preventDefault();
     if (!canEdit()) return toast("Your role is read-only.");
     const f = Object.fromEntries(new FormData(form).entries());
+    const picked = Array.from((form.attachFiles && form.attachFiles.files) || []);
+    delete f.attachFiles;
     Object.keys(f).forEach(k => { if (f[k] === ADD_NEW) f[k] = ""; });
     const ty = typeOf(f.type);
     const amount = num(f.amount);
     if (ty.fin && amount <= 0) return toast("Enter an amount greater than zero.");
     if (ty.cash && !f.accountId) return toast("Select the bank or cash account used.");
+    if (picked.length && !cloudSignedIn())
+      return toast("Sign in to the cloud account (Data page) to attach files — or clear the file choice.");
     if (isLocked(f.date)) return toast(lockProblem(null, f.date));
     if (f.isAsset === "Yes" && !isPurchase(f.type))
       return toast("Only a purchase (supplier bill, expense or payment out) can create an asset.");
@@ -1932,6 +1940,7 @@ function viewDaily(m) {
       // may approve, and then it is recorded as their approval, by name.
       status: approvalOn() && !canApprove() ? PENDING : f.status,
       refNo:f.refNo, againstRef:f.againstRef, docType:f.docType, docRef:f.docRef, notes:f.notes,
+      attachNote:(f.attachNote || "").trim(), attachments:[],
       createdBy:(USER ? USER.username : ""), createdAt:now, updatedAt:now
     };
     if (approvalOn() && tx.status === "Approved") approveTx(tx);
@@ -1946,6 +1955,7 @@ function viewDaily(m) {
       + (short.length ? ` · ${saysMissing(short)} yet — it cannot be approved until there is` : "")
       + (soft.length ? ` · ${saysMissing(soft)}` : ""));
     render();
+    if (picked.length) attUploadMany("transactions", tx, picked);
   };
 
   /* recent rows */
@@ -2190,8 +2200,11 @@ function txTable(list, opts = {}) {
     <td><span class="pill ${esc((tx.status||"draft").toLowerCase())}">${esc(tx.status)}</span>${
       isPending(tx) ? ` <small class="card-note">waiting</small>` : ""}${
       isIncomplete(tx) ? ` <small class="card-note" title="${esc(saysMissing(missingFields(tx)))}">incomplete</small>` : ""}</td>
-    <td>${esc(tx.refNo || "")}</td><td>${esc(tx.docRef || "")}</td>
+    <td>${esc(tx.refNo || "")}</td><td>${esc(tx.docRef || "")}${
+      attList(tx).length ? ` <small class="card-note">${attList(tx).length} file${attList(tx).length === 1 ? "" : "s"}</small>` : ""}</td>
     <td class="noprint"><div class="rowactions">
+      <button class="linkbtn" data-act="files" data-id="${esc(tx.id)}">Files${
+        attList(tx).length ? " (" + attList(tx).length + ")" : ""}</button>
       ${tx.refNo ? `<button class="linkbtn" data-act="doc" data-ref="${esc(tx.refNo)}">Form</button>` : ""}
       ${settlesDocs(tx) ? `<button class="linkbtn" data-act="apply" data-id="${esc(tx.id)}">${
         unappliedOf(tx) > 0.005 ? "Apply" : "Applied"}</button>` : ""}
@@ -2222,6 +2235,7 @@ function txTable(list, opts = {}) {
       const tx = DB.transactions.find(x => x.id === b.dataset.id);
       if (!tx) return;
       if (b.dataset.act === "apply") return applyToDocs(tx);
+      if (b.dataset.act === "files") return attDialog("transactions", tx);
       if (b.dataset.act === "del") {
         if (!canEdit()) return toast("Your role is read-only.");
         const shutDel = lockProblem(tx);
@@ -2282,7 +2296,8 @@ function editTx(tx) {
     { k:"againstRef", l:"Against document | مقابل مستند", v:tx.againstRef },
     { k:"docType",    l:"Document type | نوع المستند", t:"select", opts:DOCTYPES, v:tx.docType },
     { k:"docRef",     l:"Document file / link | المستند", v:tx.docRef },
-    { k:"notes",      l:"Notes | ملاحظات", t:"textarea", v:tx.notes }
+    { k:"notes",      l:"Notes | ملاحظات", t:"textarea", v:tx.notes },
+    { k:"attachNote", l:"Attached document note | ملاحظة المستند المرفق", t:"textarea", v:tx.attachNote }
   ], f => {
     if (!canEdit()) return toast("Your role is read-only.");
     if (f.status === "Approved" && was.status === "Draft" && !canApprove())
@@ -2332,7 +2347,7 @@ function editTx(tx) {
       debit:  ty.side === "debit"  ? amount : 0,
       credit: ty.side === "credit" ? amount : 0,
       status:newStatus, refNo:f.refNo, againstRef:f.againstRef,
-      docType:f.docType, docRef:f.docRef, notes:f.notes,
+      docType:f.docType, docRef:f.docRef, notes:f.notes, attachNote:(f.attachNote || "").trim(),
       updatedAt: new Date().toISOString()
     });
 
@@ -2400,10 +2415,10 @@ function txHaystack(x) {
     .filter(v => num(v))
     .reduce((acc, v) => acc.concat([String(num(v)), fmt(v)]), []);
   return [x.id, x.sourceRef, x.date, x.type, x.phase, x.status, x.currency, x.isAsset,
-          x.caseNo, x.refNo, x.againstRef, x.docType, x.docRef, x.notes, x.createdBy,
+          x.caseNo, x.refNo, x.againstRef, x.docType, x.docRef, x.notes, x.attachNote, x.createdBy,
           x.customerId, x.supplierId, x.employeeId, x.projectId, x.accountId,
           x.categoryId, x.itemId]
-    .concat(names).concat(money)
+    .concat(names).concat(money).concat(attList(x).map(a => a.name))
     .filter(Boolean).join(" ").toLowerCase();
 }
 
@@ -2740,11 +2755,12 @@ function viewLedger(m) {
 function exportTransactionsCsv() {
   const cols = ["id","date","type","phase","caseNo","customerId","supplierId","employeeId","projectId",
                 "accountId","categoryId","itemId","qty","unitPrice","discount","isAsset","currency","fxRate","debit","credit","status","refNo","againstRef",
-                "docType","docRef","notes","createdBy"];
+                "docType","docRef","notes","attachNote","attachments","createdBy"];
   const refTbl = { customerId:"customers", supplierId:"suppliers", employeeId:"employees",
                    projectId:"projects", accountId:"accounts", categoryId:"categories", itemId:"items" };
   const head = cols.join(",");
   const body = DB.transactions.map(tx => cols.map(c => csvCell(
+    c === "attachments" ? attList(tx).map(a => a.name).join("; ") :
     refTbl[c] ? (tx[c] ? `${tx[c]} ${nameOf(refTbl[c], tx[c]) || ""}`.trim() : "") : tx[c]
   )).join(",")).join("\n");
   saveFile(`environmsafe-transactions-${today()}.csv`, head + "\n" + body, "text/csv");
@@ -4868,6 +4884,165 @@ function cloudMessage(e) {
   if (/already registered/i.test(m))         return "That email already has an account — use Sign in.";
   if (/Password should be/i.test(m))         return "Password too short — use at least 6 characters.";
   return m || "Something went wrong.";
+}
+
+/* =========================================================================
+   Attachments — photos, PDFs and documents kept with a record.
+   The file itself lives in the company's private cloud storage, filed under
+   <company>/<table>/<record uid>/; the record carries only a short list of
+   what is attached (name, type, size, who, when), so the books stay small and
+   every device sees the same paperwork after a sync. Opening a file asks the
+   server for a link that works for a few minutes, so a file is never public.
+   ========================================================================= */
+
+const ATT_BUCKET = "es-attachments";
+const attList = r => (r && Array.isArray(r.attachments)) ? r.attachments : [];
+const attSafeName = n => (String(n || "file").normalize("NFKD")
+  .replace(/[^\w.\-]+/g, "_").replace(/_+/g, "_").slice(-80)) || "file";
+const attEncPath = p => String(p).split("/").map(encodeURIComponent).join("/");
+const attSize = b => b >= 1048576 ? (b / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(b / 1024)) + " KB";
+
+async function attAuth() {
+  if (!cloudSignedIn()) throw new Error("Sign in to the cloud account (Data page) to use attachments.");
+  const token = await cloudToken();
+  if (!token) throw new Error("Not signed in to the cloud account.");
+  const co = SYNC.companyId || await syncCompany();
+  return { token, co };
+}
+
+/** Upload one file and list it on the record. Does not save; the caller does. */
+async function attUpload(tbl, rec, file) {
+  if (file.size > 25 * 1048576) throw new Error(`${file.name} is larger than 25 MB.`);
+  const { token, co } = await attAuth();
+  if (!rec.uid) rec.uid = newUid();
+  const path = `${co}/${tbl}/${rec.uid}/${Date.now().toString(36)}-${attSafeName(file.name)}`;
+  const r = await fetch(`${CLOUD.url}/storage/v1/object/${ATT_BUCKET}/${attEncPath(path)}`, {
+    method: "POST",
+    headers: { apikey: CLOUD.key, Authorization: "Bearer " + token,
+               "Content-Type": file.type || "application/octet-stream", "x-upsert": "false" },
+    body: file
+  });
+  if (!r.ok) {
+    let m = "HTTP " + r.status;
+    try { const b = await r.json(); m = b.message || b.error || m; } catch (e) { /* keep status */ }
+    throw new Error(`Could not upload ${file.name}: ${m}`);
+  }
+  const a = { path, name: file.name || "file", type: file.type || "", size: file.size || 0,
+              at: new Date().toISOString(), by: (USER ? USER.username : "") };
+  rec.attachments = attList(rec).concat([a]);
+  rec.updatedAt = a.at;
+  return a;
+}
+
+/** Upload several, save once, tell the user what happened. */
+async function attUploadMany(tbl, rec, files, after) {
+  let ok = 0; const bad = [];
+  toast(`Uploading ${files.length} file${files.length === 1 ? "" : "s"}…`);
+  for (const f of files) {
+    try { await attUpload(tbl, rec, f); ok++; } catch (e) { bad.push(cloudMessage(e)); }
+  }
+  if (ok) {
+    noteChange("change", tbl, rec, [{ f: "attachments", from: "", to: ok + " file(s) added" }], "Attachments");
+    save();
+    if (typeof syncNow === "function") syncNow(true);
+  }
+  toast(bad.length ? `${ok} attached to ${rec.id} · ${bad.join(" · ")}` : `${ok} file${ok === 1 ? "" : "s"} attached to ${rec.id}`);
+  if (after) after(); else render();
+  return ok;
+}
+
+/** A short-lived link to one file. */
+async function attLink(a) {
+  const { token } = await attAuth();
+  const d = await cloudFetch(`/storage/v1/object/sign/${ATT_BUCKET}/${attEncPath(a.path)}`, {
+    method: "POST", headers: { Authorization: "Bearer " + token },
+    body: JSON.stringify({ expiresIn: 900 })
+  });
+  const u = d && (d.signedURL || d.signedUrl);
+  if (!u) throw new Error("The server did not return a link.");
+  return CLOUD.url + "/storage/v1" + (u.startsWith("/") ? u : "/" + u);
+}
+
+async function attOpen(a) {
+  // The phone app hands web links to the browser; a website tab is opened at
+  // once, while the tap still counts as the user's, then pointed at the file.
+  const inApp = typeof window.AndroidBridge !== "undefined";
+  const w = inApp ? null : window.open("", "_blank");
+  try {
+    const url = await attLink(a);
+    if (inApp) location.href = url;
+    else if (w) w.location = url; else location.href = url;
+  } catch (e) { if (w) w.close(); toast(cloudMessage(e)); }
+}
+
+async function attRemove(tbl, rec, a) {
+  const { token } = await attAuth();
+  await cloudFetch(`/storage/v1/object/${ATT_BUCKET}/${attEncPath(a.path)}`, {
+    method: "DELETE", headers: { Authorization: "Bearer " + token }
+  });
+  rec.attachments = attList(rec).filter(x => x.path !== a.path);
+  rec.updatedAt = new Date().toISOString();
+  noteChange("change", tbl, rec, [{ f: "attachments", from: a.name, to: "" }], "Attachment removed");
+  save();
+  if (typeof syncNow === "function") syncNow(true);
+}
+
+/** The files of one record: open, add, remove, and the attached-document note. */
+function attDialog(tbl, rec) {
+  const bg = el("div", { class: "modal-bg" });
+  const box = el("div", { class: "modal" });
+  const draw = () => {
+    const list = attList(rec);
+    box.innerHTML = `<h2>${esc("Files — " + rec.id)}</h2>
+      <div class="card-note" style="margin-bottom:.6rem">${esc([rec.date, rec.type, rec.refNo ? "Ref " + rec.refNo : ""].filter(Boolean).join(" · "))}</div>
+      ${list.length ? `<div class="tablewrap"><table><tbody>${list.map((a, i) => `<tr>
+        <td>${esc(a.name)}<br><small class="card-note">${esc(attSize(a.size || 0))} · ${esc((a.at || "").slice(0, 10))}${a.by ? " · " + esc(a.by) : ""}</small></td>
+        <td class="noprint"><div class="rowactions">
+          <button class="linkbtn" type="button" data-open="${i}">Open</button>
+          ${canEdit() ? `<button class="linkbtn" type="button" data-rm="${i}">${esc(t("del"))}</button>` : ""}
+        </div></td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="empty">No files attached yet.</div>`}
+      <form class="attForm" style="margin-top:.8rem">
+        ${fld("Attached document note | ملاحظة المستند المرفق",
+          `<textarea name="attachNote" rows="3">${esc(rec.attachNote || "")}</textarea>`).outerHTML}
+        ${canEdit() ? fld("Add files — photos, PDF, documents | إرفاق ملفات",
+          `<input type="file" name="attachFiles" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt">`).outerHTML : ""}
+        <div class="actions">
+          <button class="btn ghost" type="button" data-close>${esc(t("cancel"))}</button>
+          ${canEdit() ? `<button class="btn gold" type="submit">${esc(t("save"))}</button>` : ""}
+        </div>
+      </form>`;
+    box.querySelectorAll("[data-open]").forEach(b => b.onclick = () => attOpen(list[+b.dataset.open]));
+    box.querySelectorAll("[data-rm]").forEach(b => b.onclick = async () => {
+      const a = list[+b.dataset.rm];
+      if (!confirm(`Remove ${a.name} from ${rec.id}? The file is deleted.`)) return;
+      try { await attRemove(tbl, rec, a); toast("Removed " + a.name); draw(); render(); }
+      catch (e) { toast(cloudMessage(e)); }
+    });
+    box.querySelector("[data-close]").onclick = () => bg.remove();
+    const form = box.querySelector(".attForm");
+    form.onsubmit = async e => {
+      e.preventDefault();
+      if (!canEdit()) return toast("Your role is read-only.");
+      const note = (form.attachNote.value || "").trim();
+      const files = Array.from((form.attachFiles && form.attachFiles.files) || []);
+      if (note !== (rec.attachNote || "")) {
+        const before = JSON.parse(JSON.stringify(rec));
+        rec.attachNote = note; rec.updatedAt = new Date().toISOString();
+        noteChange("change", tbl, rec, fieldsChanged(before, rec), "Attached document note");
+        save();
+        if (!files.length) { if (typeof syncNow === "function") syncNow(true); toast("Saved " + rec.id); }
+      }
+      if (files.length) {
+        form.querySelectorAll("button").forEach(b => b.setAttribute("disabled", ""));
+        await attUploadMany(tbl, rec, files, () => { render(); draw(); });
+      } else { bg.remove(); render(); }
+    };
+  };
+  draw();
+  bg.appendChild(box);
+  bg.onclick = e => { if (e.target === bg) bg.remove(); };
+  document.body.appendChild(bg);
 }
 
 /* =========================================================================
