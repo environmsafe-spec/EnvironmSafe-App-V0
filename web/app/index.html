@@ -2075,8 +2075,8 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.22.0";
-const APP_BUILD   = "2026-09-13";
+const APP_VERSION = "1.23.0";
+const APP_BUILD   = "2026-09-24";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
 const ADD_NEW = "__addnew__";
@@ -5129,24 +5129,51 @@ function pendingChanges() {
 
 const pendingCount = () => (cloudSignedIn() ? pendingChanges().length : 0);
 
+/* Sent one kind of record at a time. On 21 Sep 2026 the server began refusing
+   one kind (the history log) that a new version of the app had started to
+   send; because everything went up together, that one refusal held back every
+   transaction on the phone for two days. Now a refused kind is reported and
+   left waiting, and every other kind still goes through. */
 async function syncPush() {
   const changes = pendingChanges();
   if (!changes.length) return 0;
   const cid = SYNC.companyId;
-  const rows = changes.map(c => ({ company_id:cid, collection:c.collection,
-                                   record_id:c.record_id, data:c.data, deleted:c.deleted }));
-  // Sent in batches so one very large first sync cannot fail as a single request.
-  for (let i = 0; i < rows.length; i += 200) {
-    await cloudRest("/es_records?on_conflict=company_id,collection,record_id", {
-      method:"POST",
-      headers:{ Prefer:"resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify(rows.slice(i, i + 200))
-    });
+  const kinds = [];
+  changes.forEach(c => { if (!kinds.includes(c.collection)) kinds.push(c.collection); });
+  // Money first: if anything is going to be held back, it is never the ledger.
+  kinds.sort((a, b) => (a === "transactions" ? -1 : b === "transactions" ? 1 : 0));
+  let sent = 0;
+  const refused = [];
+  for (const kind of kinds) {
+    const mine = changes.filter(c => c.collection === kind);
+    const rows = mine.map(c => ({ company_id:cid, collection:c.collection,
+                                  record_id:c.record_id, data:c.data, deleted:c.deleted }));
+    try {
+      // Sent in batches so one very large first sync cannot fail as a single request.
+      for (let i = 0; i < rows.length; i += 200) {
+        await cloudRest("/es_records?on_conflict=company_id,collection,record_id", {
+          method:"POST",
+          headers:{ Prefer:"resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify(rows.slice(i, i + 200))
+        });
+      }
+    } catch (e) {
+      // No connection at all is not a refusal: stop and try everything later.
+      if (!e.status) { syncSave(); throw e; }
+      refused.push(kind + " (" + mine.length + "): " + cloudMessage(e));
+      continue;
+    }
+    // Only mark as exchanged once the server has actually taken it.
+    mine.forEach(c => { if (c.deleted) delete SYNC.synced[c._k]; else SYNC.synced[c._k] = c._h; });
+    sent += mine.length;
+    syncSave();
   }
-  // Only mark as exchanged once the server has actually taken it.
-  changes.forEach(c => { if (c.deleted) delete SYNC.synced[c._k]; else SYNC.synced[c._k] = c._h; });
-  syncSave();
-  return changes.length;
+  if (refused.length) {
+    const err = new Error("The cloud refused " + refused.join("; ") + ". Everything else was sent.");
+    err.partial = true; err.sent = sent;
+    throw err;
+  }
+  return sent;
 }
 
 /* How many records one answer may carry. The server caps a single response at
@@ -5254,23 +5281,31 @@ async function syncNow(quiet) {
     // On the very first exchange the company's books are read before anything
     // is offered, so this device can stand down in their favour.
     const joining = !SYNC.lastPull;
-    let pushed = 0, pulled = 0;
+    let pushed = 0, pulled = 0, pushFail = null;
     if (joining) {
       pulled = await syncPull();
       if (adoptCompanyBooks()) save();
-      pushed = await syncPush();
+      try { pushed = await syncPush(); }
+      catch (e) { if (!e.partial) throw e; pushed = e.sent || 0; pushFail = e; }
     } else {
-      pushed = await syncPush();
+      /* A refusal on the way out must never stop the books coming in: the
+         office would otherwise stop seeing each other's work as well. */
+      try { pushed = await syncPush(); }
+      catch (e) { if (!e.partial) throw e; pushed = e.sent || 0; pushFail = e; }
       pulled = await syncPull();
     }
     SYNC.lastAt = new Date().toISOString();
-    SYNC_LAST_FAIL = "";
+    SYNC_LAST_FAIL = pushFail ? cloudMessage(pushFail) : "";
     syncSave();
     if (pulled) save();
     // Numbers for the work to come, while the connection is known good.
     numbersWarm();
     // With the books safely up, take the day's copy if one is due.
     driveMaybeBackup();
+    if (pushFail) {
+      if (!quiet) toast("Received " + pulled + " · " + SYNC_LAST_FAIL);
+      return { pushed: pushed, pulled: pulled, refused: SYNC_LAST_FAIL };
+    }
     if (!quiet) toast("Synced — " + pushed + " sent, " + pulled + " received");
     return { pushed: pushed, pulled: pulled };
   } catch (e) {
