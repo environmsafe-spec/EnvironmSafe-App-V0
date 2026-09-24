@@ -95,6 +95,14 @@ function startMockSupabase(port, opts) {
 
         if (u.startsWith('/rest/v1/es_records')) {
           if (req.method === 'POST') {
+            // The real table refuses any kind of record not on its list
+            // (constraint es_records_collection_check), and refuses the whole
+            // request with it. Mirrored here so the suite fails the day the app
+            // starts sending a kind the server has not been told about.
+            const list = Array.isArray(p) ? p : [p];
+            const bad = list.find(r => !srv.collections.includes(r.collection));
+            if (bad) return send(400, { code: '23514',
+              message: 'new row for relation "es_records" violates check constraint "es_records_collection_check"' });
             const at = stamp();
             (Array.isArray(p) ? p : [p]).forEach(r => {
               rows.set(r.collection + '/' + r.record_id, {
@@ -192,6 +200,9 @@ function startMockSupabase(port, opts) {
   srv.counters = Object.create(null);   // prefix -> the next number to hand out
   srv.reserves = 0;
   srv.counterFails = 0;                 // stage this many refusals from the counter
+  // Must match the live constraint es_records_collection_check.
+  srv.collections = ['users','items','assets','customers','suppliers','employees',
+                     'projects','accounts','categories','transactions','meta','audit'];
   srv.objects = new Map();             // bucket/path -> { type, size }
   srv.driveFiles = new Map();
   srv.driveSeq = 0;
