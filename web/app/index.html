@@ -267,6 +267,32 @@
     .printhead .logo { background:#E8A317; color:#1A2744; }
     th { background:#eee !important; color:#000; }
     tbody tr:hover { background:none; }
+
+    /* Official documents (purchase orders, invoices, quotations) go to suppliers
+       and customers, so they print at standard business-document sizes rather
+       than the compact 9px of an internal report: 10.5pt body, 10pt line items,
+       18pt title, and nothing below 8pt. Points, so the PDF reads as expected. */
+    .doc { border:0; padding:0; font-size:10.5pt; line-height:1.4; }
+    .doc .lh-logo { width:120px; }
+    .doc .lh-co b { font-size:14pt; }
+    .doc .lh-ar { font-size:12pt; }
+    .doc .lh-co small { font-size:9pt; color:#333; }
+    .doc .lh-title { margin-bottom:10pt; }
+    .doc .lh-title b { font-size:18pt; }
+    .doc .lh-title span { font-size:11pt; color:#333; }
+    .doc-meta { gap:10pt; margin-bottom:12pt; }
+    .doc-meta h3, .doc-pay h3 { font-size:9pt; color:#333; margin-bottom:3pt; }
+    .doc-meta div p { font-size:10.5pt; line-height:1.4; }
+    .doc-pay { font-size:10pt; margin-bottom:10pt; }
+    .doc table { font-size:10pt; }
+    .doc th { font-size:9pt; padding:4pt 5pt; }
+    .doc td { padding:4pt 5pt; }
+    .doc td small { font-size:9pt; }
+    .doc .totals { width:min(260pt,100%); font-size:10.5pt; }
+    .doc .totals td { padding:2pt 5pt; }
+    .doc .totals tr:last-child td { font-size:12pt; }
+    .doc .sign { font-size:9pt; color:#333; }
+    .doc .doc-note { font-size:9pt; color:#333; }
   }
   @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
 </style>
