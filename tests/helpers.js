@@ -30,11 +30,14 @@ function buildFixtures(mockUrl) {
                             `url: ${JSON.stringify(mockUrl)}`);
   if (wired === src) throw new Error('could not point the app at the mock server');
   fs.writeFileSync(path.join(dir, 'app-cloud.html'), wired);
+  // the official forms' fonts, logos and QR library sit beside the app
+  fs.cpSync(path.join(path.dirname(APP_SRC), 'doc'), path.join(dir, 'doc'), { recursive: true });
   return dir;
 }
 
 function startStatic(dir, port) {
-  const types = { '.html':'text/html', '.js':'application/javascript', '.json':'application/json' };
+  const types = { '.html':'text/html', '.js':'application/javascript', '.json':'application/json',
+                  '.jpg':'image/jpeg', '.png':'image/png', '.woff2':'font/woff2' };
   const srv = http.createServer((req, res) => {
     const file = path.join(dir, decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, ''));
     fs.readFile(file, (err, buf) => {
