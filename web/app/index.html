@@ -505,7 +505,7 @@ const T = {
   r_asset:["Asset register & depreciation","سجل الأصول والإهلاك"], company:["Company profile","بيانات الشركة"],
   r_item:["Product & service report","تقرير المنتجات والخدمات"],
   r_document:["Official documents","المستندات الرسمية"],
-  documents:["Invoices & quotations","الفواتير وعروض الأسعار"],
+  documents:["Invoices, quotes, POs & RFQs","الفواتير والعروض وأوامر الشراء"],
   customers:["Customers","العملاء"], suppliers:["Suppliers","الموردون"],
   employees:["Employees","الموظفون"], projects:["Projects","المشاريع"],
   accounts:["Bank & cash","البنوك والنقد"], categories:["Expense categories","بنود المصروفات"],
@@ -2095,7 +2095,7 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.24.0";
+const APP_VERSION = "1.25.0";
 const APP_BUILD   = "2026-11-17";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
@@ -4243,11 +4243,25 @@ function officialDoc(lines, refNo) {
 
 const DOCKIND = {
   INVOICE:   { type:"INVOICE OUT",   prefix:"INV", title:"INVOICE",   docType:"Invoice",
-               noLabel:"INVOICE #",   word:"invoice" },
+               noLabel:"INVOICE #",   word:"invoice", label:"Invoice", party:"customer" },
   QUOTATION: { type:"QUOTATION OUT", prefix:"Q",   title:"QUOTATION", docType:"Quotation",
-               noLabel:"QUOTATION #", word:"quotation" }
+               noLabel:"QUOTATION #", word:"quotation", label:"Quotation", party:"customer" },
+  /* the purchase side: addressed to a supplier, numbered as the PDFs were
+     (a PO is the bare date and sequence, 2026110101; an RFQ is RFQ-2026110101) */
+  PO:        { type:"PO OUT",  prefix:"",    title:["PURCHASE", "ORDER"], docType:"Purchase Order",
+               noLabel:"PO #",  word:"purchase order", label:"Purchase order", party:"supplier" },
+  RFQ:       { type:"RFQ OUT", prefix:"RFQ", title:["REQUEST FOR", "QUOTATION"], docType:"RFQ",
+               noLabel:"RFQ #", word:"request for quotation", label:"RFQ", party:"supplier" }
 };
 const kindOfType = type => Object.keys(DOCKIND).find(k => DOCKIND[k].type === type) || "";
+const isBuyDoc = kind => DOCKIND[kind] && DOCKIND[kind].party === "supplier";
+/** Which field and table hold the other side of a document. */
+const partyKey = kind => isBuyDoc(kind) ? "supplierId" : "customerId";
+const partyTable = kind => isBuyDoc(kind) ? "suppliers" : "customers";
+const docParty = doc => byId(partyTable(doc.kind), doc[partyKey(doc.kind)]);
+/** Where an order is to be invoiced, as every PO prints it. */
+const INVOICE_TO = "EnvironmSafe For Engineering, Trading, and Services Ltd, Aden-Alburaqah, Yemen | Attn: General Manager | " +
+  "support@environmsafe.com | Tel/Mobile: (967) 773033186 - 783402932";
 
 /* The form's own words, exactly as the PDFs print them. They are the paper's
    wording, not the editable company profile, so a profile edit cannot quietly
@@ -4310,7 +4324,8 @@ function amountInWords(v, cur) {
 /* ---- numbering ---- */
 /** The next free INV-/Q- number for that day: YYYYMMDD plus a two-digit sequence. */
 function docNextNumber(kind, date) {
-  const head = `${DOCKIND[kind].prefix}-${String(date || today()).replace(/-/g, "").slice(0, 8)}`;
+  const pre = DOCKIND[kind].prefix;
+  const head = (pre ? pre + "-" : "") + String(date || today()).replace(/-/g, "").slice(0, 8);
   const taken = new Set(DB.transactions.map(x => x.refNo).filter(Boolean)
     .concat(Object.keys(DB.meta.docs || {})));
   let n = 1;
@@ -4358,10 +4373,12 @@ function docResolve(ref) {
   txl.filter(x => !used.has(x.uid)).forEach(x => lines.push(Object.assign(lineFromTx(x), { amount:rawAmount(x) })));
   lines.forEach(ln => { if (ln.amount == null) ln.amount = round2(num(ln.qty) * num(ln.price) - num(ln.discount)); });
   const date = h.date || head.date || today();
-  const cust = byId("customers", h.customerId || head.customerId);
-  return Object.assign(docDefaults(kind, date, cust), h, {
+  const pk = partyKey(kind);
+  const party = byId(partyTable(kind), h[pk] || head[pk]);
+  return Object.assign(docDefaults(kind, date, party), h, {
     ref, kind, date,
     customerId: h.customerId || head.customerId || "",
+    supplierId: h.supplierId || head.supplierId || "",
     projectId: h.projectId || head.projectId || "",
     accountId: h.accountId != null ? h.accountId : (head.accountId || ""),
     currency: h.currency || (txl.length ? txCurrency(head) : (CO().currency || "USD")),
@@ -4375,6 +4392,7 @@ function docResolve(ref) {
 function docDefaults(kind, date, cust) {
   const all = Object.values(DB.meta.docs || {}).filter(d => d && d.kind === kind && d.v)
     .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  if (isBuyDoc(kind)) return buyDefaults(kind, date, cust, all);
   const last = all[0];
   const lastCust = cust && all.find(d => d.customerId === cust.id);
   const tcs = last && Array.isArray(last.tcs) ? last.tcs.map(t2 => ({ k:t2.k, v:t2.v }))
@@ -4394,6 +4412,37 @@ function docDefaults(kind, date, cust) {
     intro: kind === "QUOTATION" ? "Dear Sir, further to your request, we are pleased to submit our offer as detailed below." : "",
     tcs, words:true, vatRate:"", sign:"stamp", signDate:true,
     qr: kind === "INVOICE", accred: kind === "QUOTATION"
+  };
+}
+
+/** The same for a PO or an RFQ, worded as the purchase forms are. */
+function buyDefaults(kind, date, sup, all) {
+  const last = all[0];
+  const lastSup = sup && all.find(d => d.supplierId === sup.id);
+  const isPO = kind === "PO";
+  const contact = sup && sup.contact ? sup.contact : "";
+  const tcs = last && Array.isArray(last.tcs) ? last.tcs.map(t2 => ({ k:t2.k, v:/^reference$/i.test(t2.k) ? "" : t2.v }))
+    : isPO
+      ? [{ k:"Reference", v:"" }, { k:"Payment", v:"" }, { k:"Delivery", v:"" }, { k:"Warranty", v:"" },
+         { k:"Project", v:"" }, { k:"Invoice To", v:INVOICE_TO }, { k:"Requested By", v:"" }]
+      : [{ k:"Prices", v:"Unit price and total for each item, with the currency, and any taxes or charges shown separately" },
+         { k:"Validity", v:"How long your quotation stays valid" },
+         { k:"Delivery", v:"Delivery time and place (ex-works / delivered Aden)" },
+         { k:"Payment", v:"Your payment terms" },
+         { k:"Technical", v:"Make, model, datasheet, origin and warranty of each item, and any alternative you propose" },
+         { k:"Send To", v:"support@environmsafe.com before the reply date above, quoting the RFQ number" },
+         { k:"Contact", v:"" }];
+  return {
+    v:1, kind,
+    to: lastSup && Array.isArray(lastSup.to) ? lastSup.to.slice()
+      : sup ? [sup.nameEn || "", sup.address || "", [sup.phone ? "Tel: " + sup.phone : "", sup.email || ""].filter(Boolean).join("  |  "),
+               contact ? "Attn: " + contact : ""].filter(Boolean) : [],
+    customerRef: "",
+    l3: isPO ? "REFERENCE" : "PROJECT", v3: "",
+    l4: isPO ? "DELIVERY" : "REPLY BY", v4: isPO ? "" : dmy(addDays(date, 7)),
+    intro: "", tcs, words:false, vatRate:"", sign:"stamp", signDate:true, qr:false, accred:false,
+    supSigner: lastSup ? lastSup.supSigner || "" : contact,
+    reqTitle: "", reqs: []
   };
 }
 
@@ -4489,6 +4538,24 @@ table { border-collapse:collapse; border-spacing:0; }
 .acclab { position:absolute; left:${PG.L}pt; bottom:${92 - (1 - BASE) * 9}pt; font-size:9pt; line-height:9pt;
   font-weight:bold; color:#14294a; }
 .accrule { position:absolute; left:${PG.L + 52}pt; width:${PG.CR - PG.L - 52}pt; bottom:95pt; border-top:.6pt solid #c9d3df; }
+.items.po th { font-size:8.5pt; padding:0 6pt; }
+.items.po td { font-size:8.5pt; padding:3pt 6pt; line-height:1.2; }
+.items.po td.n { padding-right:8pt; }
+.items.po .d .m { font-size:8.5pt; }
+.items.po .d .s { font-size:7.5pt; }
+.totwrap { position:relative; margin-top:8pt; break-inside:avoid; }
+.totwrap .fill { position:absolute; left:0; top:${11 - BASE * 7.5}pt; font-size:7.5pt; line-height:7.5pt; font-style:italic; color:#555; }
+.tot.po { width:${(PG.CR - (PG.L + 270)).toFixed(2)}pt; margin-left:auto; }
+.tot.po td { height:22pt; padding:0 6pt; }
+.tot.po tr.g td { height:26pt; }
+.req { margin-top:${14 - BASE * 8.5}pt; break-inside:avoid; }
+.req .rh { display:block; width:fit-content; font-size:8.5pt; line-height:8.5pt; font-weight:bold; color:#14294a;
+  border-bottom:.6pt solid #14294a; padding-bottom:${(1.7 - (1 - BASE) * 8.5).toFixed(2)}pt; }
+.req .ri { font-size:7.8pt; line-height:10pt; color:#555; margin-top:2pt; }
+.req .rh + .ri { margin-top:1.7pt; }
+.sig2 { position:relative; break-inside:avoid; }
+.sig2 .ln { position:absolute; border-top:.8pt solid #14294a; height:0; }
+.sig2 img.stamp { position:absolute; width:165pt; height:${(165 * 267 / 387).toFixed(2)}pt; }
 .warn { font:12px/1.4 sans-serif; color:#b3261e; background:#fff4f2; border:1px dashed #b3261e; padding:4px 8px;
   margin:6px 0; }
 @media screen { .sheet { zoom:var(--z, 1); } }
@@ -4525,6 +4592,7 @@ function qrSvg(text) {
 const VERIFY_URL = "https://www.environmsafe.com/verify?t=";
 
 function docSheetHtml(doc) {
+  if (isBuyDoc(doc.kind)) return buySheetHtml(doc);
   const K = DOCKIND[doc.kind], isQ = doc.kind === "QUOTATION";
   const tt = docTotalsOf(doc);
   const cur = doc.currency || "USD";
@@ -4638,6 +4706,112 @@ function docSheetHtml(doc) {
   return h;
 }
 
+/** The purchase order and the request for quotation, drawn to po.py: a
+    two-line title, the supplier's block, prices to the right of the items, and
+    two signature blocks on a PO (ours, and the supplier's acceptance). An RFQ
+    leaves the prices to the supplier unless they are already known. */
+function buySheetHtml(doc) {
+  const K = DOCKIND[doc.kind], isPO = doc.kind === "PO";
+  const cur = doc.currency || "USD";
+  const tt = docTotalsOf(doc);
+  const sup = docParty(doc) || {};
+  const priced = isPO || doc.lines.some(l => num(l.price) > 0);
+
+  let h = `<div class="stripe"></div><div class="band"><span>${esc(FORM_CO.band)}</span></div>
+    <img class="logo" src="doc/es_logo.jpg" alt="">
+    ${ptText(245, 52, FORM_CO.brand, 17, { bold:true, color:"#14294a", align:"c" })}
+    ${FORM_CO.lines.map((s, i) => ptText(245, 66 + i * 11, s, 8.5, { align:"c" })).join("")}
+    ${K.title.map((s, i) => ptText(PG.CR, 56 + i * 20, s, 18, { bold:true, color:"#d9a21b", align:"r" })).join("")}
+    <div class="rule"></div>
+    ${ptText(PG.L, 140, "TO:", 8, { bold:true, color:"#d9a21b" })}`;
+  (doc.to || []).filter(s => String(s).trim()).forEach((s, i) => {
+    h += ptText(PG.L, 156 + i * 13, s, i ? 9 : 10, { bold:!i, color: i ? "#555" : "#14294a" });
+  });
+  h += `<table class="meta"><tbody>
+    <tr class="h"><td>${esc(K.noLabel)}</td><td>DATE</td></tr>
+    <tr class="v"><td>${esc(doc.ref)}</td><td>${esc(dmy(doc.date))}</td></tr>
+    <tr class="h"><td>${esc(doc.l3 || "")}</td><td>${esc(doc.l4 || "")}</td></tr>
+    <tr class="v"><td>${esc(doc.v3 || "")}</td><td>${esc(doc.v4 || "")}</td></tr></tbody></table>`;
+
+  const cw = [26, 190, 34, 30, 70, 68];
+  cw.push(+(PG.CW - cw.reduce((a, b) => a + b, 0)).toFixed(2));
+  const heads = ["SN", isPO ? "DESCRIPTION" : "DESCRIPTION / SPECIFICATION", "UNIT", "QTY", "UNIT PRICE", "AMOUNT",
+                 isPO ? "CURRENCY" : "REMARKS"];
+  const rows = doc.lines.map((l, i) => {
+    const has = isPO || num(l.price) > 0;
+    const gross = round2(num(l.qty) * num(l.price));
+    return `<tr style="height:${l.sub ? 34 : 22}pt"><td>${i + 1}</td>
+      <td class="d"><span class="m">${esc(l.desc)}</span>${l.sub ? `<span class="s">${esc(l.sub)}</span>` : ""}</td>
+      <td>${esc(l.unit)}</td><td>${qtyText(l.qty)}</td>
+      <td class="n">${has ? money2(l.price) : ""}</td><td class="n a">${has ? money2(gross) : ""}</td>
+      <td>${isPO ? esc(cur) : ""}</td></tr>`;
+  }).join("");
+
+  /* the six rows of the purchase forms; on an RFQ without prices they stay
+     empty for the supplier to write in */
+  const pct = tt.gross ? round2(tt.discount / tt.gross * 100) : 0;
+  const v = x => priced ? x : "";
+  const totRows = [
+    ["SUBTOTAL", v(money2(tt.gross))],
+    [tt.discount && Number.isInteger(pct) ? `DISCOUNT (${pct}%)` : "DISCOUNT", v(tt.discount ? "-" + money2(tt.discount) : "0.00")],
+    ["NET AMOUNT", v(money2(tt.net))],
+    [isPO ? "TAX RATE" : "VAT RATE", v(tt.rate ? `${tt.rate}%` : "Not applicable")],
+    ["VAT", v(money2(tt.vat))]
+  ].map(r => `<tr class="l"><td>${esc(r[0])}</td><td>${esc(r[1])}</td></tr>`).join("") +
+    `<tr class="g"><td>TOTAL</td><td>${priced ? `${esc(cur)} ${money2(tt.total)}` : ""}</td></tr>`;
+
+  const tcs = (doc.tcs || []).filter(t2 => String(t2.v || "").trim());
+  if (doc.words && priced) tcs.push({ k:"Amount in words", v:amountInWords(tt.total, cur) });
+  const termsHtml = tcs.length ? `<div class="tch" style="margin-top:${(22 - BASE * 10).toFixed(2)}pt">${
+      isPO ? "Terms &amp; Conditions:" : "Please include in your quotation:"}</div>
+      <div style="height:${(6 - (1 - BASE) * 10).toFixed(2)}pt"></div>
+      ${tcs.map(t2 => `<div class="tc"><b>${esc(t2.k)}:</b> ${esc(t2.v)}</div>`).join("")}` : "";
+  const reqs = (doc.reqs || []).map(s => String(s).trim()).filter(Boolean);
+  const reqHtml = reqs.length ? `<div class="req"><span class="rh">${esc(doc.reqTitle || "Requirements:")}</span>
+      ${reqs.map((r, i) => `<div class="ri">${i + 1}. ${esc(r)}</div>`).join("")}</div>` : "";
+
+  let sign = "";
+  if (doc.sign === "official") {
+    sign = `<div class="official"><b>OFFICIAL DOCUMENT:</b> This ${esc(K.word)} is officially issued by ${
+      esc(FORM_CO.legal)} from its system and is considered an official document. It is valid without a stamp or signature.</div>`;
+  } else {
+    /* y0 = the first line of the blocks, 26 pt below the terms (18 below a
+       requirements list); everything else is measured from it, as po.py does */
+    const y0 = reqs.length ? 18 : 26, y1 = y0 + 26;
+    const mid = PG.CW / 2 + 10;
+    const stampSrc = doc.sign === "stamp" ? (CO().stamp || "") : "";
+    const date = doc.signDate ? "Date: " + dmyNum(doc.date) : "Date:";
+    let b = ptText(0, y0, "For EnvironmSafe For Engineering, Trading,", 9, { bold:true, color:"#14294a" }) +
+      ptText(0, y0 + 11, "and Services Ltd", 9, { bold:true, color:"#14294a" }) +
+      ptText(0, y1, "Authorized Signature:", 8.5) +
+      ptText(0, y1 + 108, date, 8.5) +
+      `<div class="ln" style="left:0;width:235pt;top:${y1 + 95}pt"></div>`;
+    if (isPO) {
+      const signer = doc.supSigner || "";
+      b += ptText(mid, y0, "Supplier Acceptance", 9, { bold:true, color:"#14294a" }) +
+        ptText(mid, y0 + 11, "For " + (sup.nameEn || (doc.to || [])[0] || ""), 8) +
+        ptText(mid, y1, "Name: " + signer, 8.5) +
+        ptText(mid, y1 + 14, "Signature & Stamp:", 8.5) +
+        ptText(mid, y1 + 108, "Date:", 8.5) +
+        `<div class="ln" style="left:${mid}pt;width:${(PG.CW - mid).toFixed(2)}pt;top:${y1 + 95}pt"></div>`;
+    }
+    if (stampSrc) b += `<img class="stamp" src="${stampSrc}" alt="" style="left:55pt;top:${(y1 + 100 - 165 * 267 / 387).toFixed(2)}pt">`;
+    sign = `<div class="sig2" style="height:${y1 + 112}pt">${b}</div>${doc.sign === "stamp" && !stampSrc
+      ? `<div class="warn">No signature &amp; stamp image yet — add it under System → Company profile. Nothing is printed in its place.</div>` : ""}`;
+  }
+
+  h += `<table class="layout"><thead><tr><td></td></tr></thead>
+    <tfoot><tr><td></td></tr></tfoot><tbody><tr><td><div class="body" style="--top:250pt;padding-top:250pt">
+    <table class="items po"><colgroup>${cw.map(w => `<col style="width:${w}pt">`).join("")}</colgroup>
+      <thead><tr style="height:22pt">${heads.map(x => `<th>${esc(x)}</th>`).join("")}</tr></thead>
+      <tbody>${rows}</tbody></table>
+    <div class="totwrap">${priced ? "" : `<div class="fill">Prices, totals and remarks to be filled in by the supplier.</div>`}
+      <table class="tot po"><tbody>${totRows}</tbody></table></div>
+    ${termsHtml}${reqHtml}${sign}
+    </div></td></tr></tbody></table>`;
+  return h;
+}
+
 /** The form in its own shadow root, sized to the screen; print shows it at A4. */
 function docSheet(doc) {
   const host = el("div", { class:"docsheet-host" });
@@ -4679,7 +4853,8 @@ function docList() {
   return Object.values(groups).map(g => {
     const h = docHeader(g.ref) || {};
     const head = g.lines.slice().sort((a, b) => inOrder(a.id, b.id))[0];
-    const cust = byId("customers", h.customerId || head.customerId);
+    const pk = partyKey(g.kind);
+    const cust = byId(partyTable(g.kind), h[pk] || head[pk]);
     const statuses = [...new Set(g.lines.map(x => x.status).filter(Boolean))];
     return { ref:g.ref, kind:g.kind, date:h.date || head.date, customer:cust ? cust.nameEn : "",
              total: sum(g.lines, rawAmount), currency: txCurrency(head), status: statuses.join(", "),
@@ -4690,22 +4865,24 @@ function docList() {
 function viewDocDesk(m) {
   if (DOCUI.mode === "edit" && DOCUI.draft) return docEditor(m);
   if (DOCUI.mode === "view" && DOCUI.ref) return docViewer(m);
-  pageHead(m, t("documents"), "Invoices and quotations: type them here, print them on the official form.", [
+  pageHead(m, t("documents"), "Invoices, quotations, purchase orders and RFQs: type them here, print them on the official form.", [
     { label:"+ New invoice", cls:"gold", disabled:!canEdit(), on:() => docStart("INVOICE") },
-    { label:"+ New quotation", cls:"", disabled:!canEdit(), on:() => docStart("QUOTATION") }
+    { label:"+ New quotation", cls:"", disabled:!canEdit(), on:() => docStart("QUOTATION") },
+    { label:"+ New PO", cls:"", disabled:!canEdit(), on:() => docStart("PO") },
+    { label:"+ New RFQ", cls:"", disabled:!canEdit(), on:() => docStart("RFQ") }
   ]);
   const card = el("div", { class:"card" });
   const bar = el("div", { class:"toolbar noprint" });
-  bar.appendChild(fld("Search | بحث", `<input type="search" id="docQ" value="${esc(DOCUI.q)}" placeholder="number, customer, date">`));
+  bar.appendChild(fld("Search | بحث", `<input type="search" id="docQ" value="${esc(DOCUI.q)}" placeholder="number, customer, supplier, date">`));
   card.appendChild(bar);
   const words = DOCUI.q.toLowerCase().split(/\s+/).filter(Boolean);
-  const list = docList().filter(d => words.every(w => `${d.ref} ${d.customer} ${d.date} ${d.kind}`.toLowerCase().includes(w)));
+  const list = docList().filter(d => words.every(w => `${d.ref} ${d.customer} ${d.date} ${d.kind} ${DOCKIND[d.kind].label}`.toLowerCase().includes(w)));
   const wrap = el("div", { class:"tablewrap" });
-  wrap.innerHTML = `<table><thead><tr><th>Number</th><th>Kind</th><th>${esc(t("date"))}</th><th>Customer</th>
+  wrap.innerHTML = `<table><thead><tr><th>Number</th><th>Kind</th><th>${esc(t("date"))}</th><th>Customer / supplier</th>
     <th class="num">${esc(t("total"))}</th><th>${esc(t("currency"))}</th><th>${esc(t("status"))}</th><th></th></tr></thead>
     <tbody>${list.slice(0, 300).map(d => `<tr>
       <td><a href="#/documents" data-open="${esc(d.ref)}">${esc(d.ref)}</a></td>
-      <td>${d.kind === "INVOICE" ? "Invoice" : "Quotation"}</td><td>${esc(d.date || "")}</td>
+      <td>${esc(DOCKIND[d.kind].label)}</td><td>${esc(d.date || "")}</td>
       <td>${esc(d.customer)}</td><td class="num">${fmt(d.total)}</td><td>${esc(d.currency)}</td>
       <td>${esc(d.status)}</td>
       <td class="noprint"><button class="btn sm" data-open="${esc(d.ref)}">Open</button></td></tr>`).join("") ||
@@ -4726,7 +4903,7 @@ function docStart(kind) {
     ? ((DB.transactions.slice().reverse().find(x => x.type === "INVOICE OUT" && x.accountId) || {}).accountId || "") : "";
   DOCUI = { mode:"edit", isNew:true, ref:"", q:DOCUI.q,
     draft: Object.assign(docDefaults(kind, date, null), {
-      ref: docNextNumber(kind, date), date, customerId:"", projectId:"", accountId:lastAcc,
+      ref: docNextNumber(kind, date), date, customerId:"", supplierId:"", projectId:"", accountId:lastAcc,
       currency: CO().currency === "YER" ? "USD" : (CO().currency || "USD"), fxRate:"",
       lines:[{ uid:"", itemId:"", desc:"", sub:"", unit:"", qty:1, price:0, discount:0 }] }) };
   render(); window.scrollTo(0, 0);
@@ -4741,7 +4918,9 @@ function docEditor(m) {
   const g = el("div", { class:"grid" });
   g.appendChild(fld("Number | الرقم", `<input name="ref" value="${esc(dr.ref)}" ${DOCUI.isNew ? "" : "readonly"} required>`));
   g.appendChild(fld("Date | التاريخ", `<input type="date" name="date" value="${esc(dr.date)}" required>`));
-  g.appendChild(fld("Customer | العميل", refSelect("customerId", "customers", dr.customerId)));
+  const buy = isBuyDoc(dr.kind), pk = partyKey(dr.kind);
+  g.appendChild(buy ? fld("Supplier | المورد", refSelect("supplierId", "suppliers", dr.supplierId))
+                    : fld("Customer | العميل", refSelect("customerId", "customers", dr.customerId)));
   g.appendChild(fld("Project | المشروع", refSelect("projectId", "projects", dr.projectId)));
   if (dr.kind === "INVOICE")
     g.appendChild(fld("Receivable account | الحساب", refSelect("accountId", "accounts", dr.accountId)));
@@ -4753,13 +4932,17 @@ function docEditor(m) {
   const g2 = el("div", { class:"grid" });
   g2.appendChild(fld("To — one line each (first line printed bold) | إلى",
     `<textarea name="to" rows="3">${esc((dr.to || []).join("\n"))}</textarea>`));
-  g2.appendChild(fld("Customer ID as printed | رقم العميل لديه", `<input name="customerRef" value="${esc(dr.customerRef || "")}">`));
+  if (!buy) g2.appendChild(fld("Customer ID as printed | رقم العميل لديه", `<input name="customerRef" value="${esc(dr.customerRef || "")}">`));
+  if (dr.kind === "PO") g2.appendChild(fld("Supplier signs as (Name: on the acceptance) | اسم المورّد الموقّع",
+    `<input name="supSigner" value="${esc(dr.supSigner || "")}" placeholder="e.g. Abubakr Mohammed, Sales">`));
   g2.appendChild(fld("Box, left heading | عنوان", `<input name="l3" value="${esc(dr.l3 || "")}">`));
   g2.appendChild(fld("Box, left text | النص", `<input name="v3" value="${esc(dr.v3 || "")}" placeholder="${dr.kind === "INVOICE" ? "e.g. PO142903" : ""}">`));
   g2.appendChild(fld("Box, right heading | عنوان", `<input name="l4" value="${esc(dr.l4 || "")}">`));
   g2.appendChild(fld("Box, right text | النص", `<input name="v4" value="${esc(dr.v4 || "")}">`));
   form.appendChild(g2);
-  form.appendChild(fld("Opening sentence (optional) | مقدمة", `<textarea name="intro" rows="2">${esc(dr.intro || "")}</textarea>`));
+  if (!buy) form.appendChild(fld("Opening sentence (optional) | مقدمة", `<textarea name="intro" rows="2">${esc(dr.intro || "")}</textarea>`));
+  if (dr.kind === "RFQ") form.appendChild(el("div", { class:"card-note" },
+    "Leave the unit prices at 0 and the supplier fills in prices, totals and remarks on the printed RFQ."));
 
   /* lines */
   const lw = el("div", { class:"tablewrap", style:"margin-top:.8rem" });
@@ -4800,9 +4983,17 @@ function docEditor(m) {
   if (dr.kind === "INVOICE")
     g3.appendChild(fld("Verification QR | رمز التحقق", `<select name="qr">
       <option value="yes" ${dr.qr ? "selected" : ""}>Print it</option><option value="no" ${!dr.qr ? "selected" : ""}>Leave out</option></select>`));
-  g3.appendChild(fld("Accreditation logos at the foot | شعارات الاعتماد", `<select name="accred">
+  if (!buy) g3.appendChild(fld("Accreditation logos at the foot | شعارات الاعتماد", `<select name="accred">
       <option value="yes" ${dr.accred ? "selected" : ""}>Print them</option><option value="no" ${!dr.accred ? "selected" : ""}>Leave out</option></select>`));
   form.appendChild(g3);
+  if (buy) {
+    const g4 = el("div", { class:"grid", style:"margin-top:.8rem" });
+    g4.appendChild(fld("Extra section heading (optional) | عنوان قسم إضافي",
+      `<input name="reqTitle" value="${esc(dr.reqTitle || "")}" placeholder="e.g. Calibration Requirements:">`));
+    g4.appendChild(fld("Its numbered points, one per line | البنود",
+      `<textarea name="reqs" rows="4">${esc((dr.reqs || []).join("\n"))}</textarea>`));
+    form.appendChild(g4);
+  }
 
   /* terms & conditions */
   const tw = el("div", { style:"margin-top:.8rem" });
@@ -4816,7 +5007,9 @@ function docEditor(m) {
   tw.appendChild(tbody);
   const addTerm = el("button", { class:"btn ghost sm", type:"button" }, "+ Add term");
   tw.appendChild(addTerm);
-  tw.appendChild(el("div", { class:"card-note" }, "The amount in words is added by itself, just before the Bank line."));
+  tw.appendChild(el("div", { class:"card-note" }, buy
+    ? (dr.kind === "RFQ" ? "Printed under “Please include in your quotation:”." : "The amount in words, when chosen, is added as the last term.")
+    : "The amount in words is added by itself, just before the Bank line."));
   form.appendChild(tw);
 
   const bar = el("div", { class:"actions", style:"display:flex;gap:.5rem;margin-top:1rem;flex-wrap:wrap" });
@@ -4833,14 +5026,17 @@ function docEditor(m) {
     const f = Object.fromEntries(new FormData(form).entries());
     Object.keys(f).forEach(k => { if (f[k] === ADD_NEW) f[k] = ""; });
     Object.assign(dr, {
-      ref: (f.ref || "").trim(), date: f.date, customerId: f.customerId || "", projectId: f.projectId || "",
+      ref: (f.ref || "").trim(), date: f.date, customerId: buy ? "" : f.customerId || "",
+      supplierId: buy ? f.supplierId || "" : "", projectId: f.projectId || "",
       accountId: f.accountId || "", currency: f.currency, fxRate: f.fxRate,
       to: String(f.to || "").split("\n").map(s => s.trim()).filter(Boolean),
       customerRef: (f.customerRef || "").trim(), l3:f.l3, v3:f.v3, l4:f.l4, v4:f.v4,
       intro: (f.intro || "").trim(), vatRate: f.vatRate, sign: f.sign,
       signDate: f.signDate === "yes", words: f.words === "yes",
-      qr: dr.kind === "INVOICE" ? f.qr === "yes" : false, accred: f.accred === "yes"
+      qr: dr.kind === "INVOICE" ? f.qr === "yes" : false, accred: !buy && f.accred === "yes"
     });
+    if (buy) Object.assign(dr, { supSigner: (f.supSigner || "").trim(), reqTitle: (f.reqTitle || "").trim(),
+      reqs: String(f.reqs || "").split("\n").map(s => s.trim()).filter(Boolean) });
     lw.querySelectorAll("tr[data-i]").forEach(tr => {
       const l = dr.lines[+tr.dataset.i];
       tr.querySelectorAll("[data-f]").forEach(inp => {
@@ -4864,17 +5060,24 @@ function docEditor(m) {
   showTotals();
 
   /* a new customer fills in who it is addressed to; an item fills its line */
-  form.customerId.addEventListener("change", () => {
-    const cu = byId("customers", form.customerId.value);
+  form[pk].addEventListener("change", () => {
+    const cu = byId(partyTable(dr.kind), form[pk].value);
     if (!cu) return;
     const d2 = docDefaults(dr.kind, dr.date, cu);
     form.to.value = d2.to.join("\n");
-    form.customerRef.value = d2.customerRef || "";
+    if (form.customerRef) form.customerRef.value = d2.customerRef || "";
+    if (form.supSigner && !form.supSigner.value) form.supSigner.value = d2.supSigner || "";
     pull();
+  });
+  /* an RFQ names its project in the box */
+  if (dr.kind === "RFQ") form.projectId.addEventListener("change", () => {
+    const pr = byId("projects", form.projectId.value);
+    if (pr && !form.v3.value) { form.v3.value = pr.nameEn || pr.id; pull(); }
   });
   form.date.addEventListener("change", () => {
     if (DOCUI.isNew) form.ref.value = docNextNumber(dr.kind, form.date.value);
     if (dr.kind === "QUOTATION" && /^\d{2}-[A-Z][a-z]{2}-\d{4}$/.test(form.v3.value)) form.v3.value = dmy(addDays(form.date.value, 30));
+    if (dr.kind === "RFQ" && /^\d{2}-[A-Z][a-z]{2}-\d{4}$/.test(form.v4.value)) form.v4.value = dmy(addDays(form.date.value, 7));
     pull();
   });
   form.currency.addEventListener("change", () => { form.fxRate.placeholder = String(fxRate(form.currency.value) || ""); pull(); showTotals(); });
@@ -4885,7 +5088,8 @@ function docEditor(m) {
     tr.querySelector('[data-f="desc"]').value = it.nameEn || "";
     if (it.notes && !tr.querySelector('[data-f="sub"]').value) tr.querySelector('[data-f="sub"]').value = it.notes.split("\n")[0];
     tr.querySelector('[data-f="unit"]').value = it.unit || "";
-    if (num(it.salePrice)) tr.querySelector('[data-f="price"]').value = num(it.salePrice);
+    const pr = buy ? num(it.costPrice) : num(it.salePrice);
+    if (pr) tr.querySelector('[data-f="price"]').value = pr;
     pull(); showTotals();
   }));
   addLine.onclick = () => { pull(); dr.lines.push({ uid:"", itemId:"", desc:"", sub:"", unit:"", qty:1, price:0, discount:0 }); render(); };
@@ -4913,7 +5117,8 @@ function docSave(dr, isNew) {
   const ref = String(dr.ref || "").trim();
   if (!ref) { toast("Give the document a number."); return ""; }
   if (!dr.date) { toast("Enter the date."); return ""; }
-  if (!dr.customerId) { toast("Choose the customer."); return ""; }
+  const buy = isBuyDoc(dr.kind), pk = partyKey(dr.kind);
+  if (!dr[pk]) { toast(buy ? "Choose the supplier." : "Choose the customer."); return ""; }
   const lines = dr.lines.filter(l => String(l.desc || "").trim() || num(l.price));
   if (!lines.length) { toast("Add at least one line."); return ""; }
   const bad = lines.findIndex(l => !String(l.desc || "").trim() || num(l.qty) <= 0);
@@ -4936,7 +5141,7 @@ function docSave(dr, isNew) {
     let item = byId("items", l.itemId);
     if (!item) {
       item = { id: nextId("ITM"), uid: newUid(), code:"", nameEn: l.desc.trim(), nameAr:"",
-        kind:"Service", unit: l.unit || "", category:"", salePrice: num(l.price), costPrice:0,
+        kind:"Service", unit: l.unit || "", category:"", salePrice: buy ? 0 : num(l.price), costPrice: buy ? num(l.price) : 0,
         isAsset:"No", lifeYears:"", currency: cur, notes: l.sub || "", createdAt:now, updatedAt:now };
       DB.items.push(item);
       noteChange("create", "items", item, [], item.nameEn);
@@ -4944,7 +5149,8 @@ function docSave(dr, isNew) {
     }
     const amount = round2(num(l.qty) * num(l.price) - num(l.discount));
     const text = l.desc.trim() + (l.sub ? " — " + l.sub.trim() : "");
-    const fields = { date: dr.date, type: K.type, phase: ty.phase, customerId: dr.customerId,
+    const fields = { date: dr.date, type: K.type, phase: ty.phase,
+      customerId: buy ? "" : dr.customerId, supplierId: buy ? dr.supplierId : "",
       projectId: dr.projectId || "", accountId: dr.kind === "INVOICE" ? (dr.accountId || "") : "",
       itemId: l.itemId, qty: num(l.qty), unitPrice: num(l.price), discount: num(l.discount),
       currency: cur, fxRate: fx, debit: ty.side === "debit" ? amount : 0, credit: ty.side === "credit" ? amount : 0,
@@ -4955,7 +5161,7 @@ function docSave(dr, isNew) {
       Object.assign(tx, fields, { updatedAt: now });
       noteChange("change", "transactions", tx, fieldsChanged(before, tx), `${tx.type} ${fmt(rawAmount(tx))} ${txCurrency(tx)}`);
     } else {
-      tx = Object.assign({ id: nextId("TRX"), uid: newUid(), caseNo:"", supplierId:"", employeeId:"",
+      tx = Object.assign({ id: nextId("TRX"), uid: newUid(), caseNo:"", employeeId:"",
         categoryId:"", isAsset:"No", status: "Draft", againstRef:"", docRef:"", attachNote:"",
         attachments:[], createdBy: who, createdAt: now, updatedAt: now }, fields);
       DB.transactions.push(tx);
@@ -4970,13 +5176,15 @@ function docSave(dr, isNew) {
   DB.meta.docs = DB.meta.docs || {};
   const prev = DB.meta.docs[ref] || {};
   DB.meta.docs[ref] = Object.assign({}, prev, {
-    v:1, kind: dr.kind, date: dr.date, customerId: dr.customerId, projectId: dr.projectId || "",
+    v:1, kind: dr.kind, date: dr.date, customerId: buy ? "" : dr.customerId, supplierId: buy ? dr.supplierId : "",
+    projectId: dr.projectId || "",
     accountId: dr.accountId || "", currency: cur, fxRate: fx, to: dr.to || [], customerRef: dr.customerRef || "",
     l3: dr.l3 || "", v3: dr.v3 || "", l4: dr.l4 || "", v4: dr.v4 || "", intro: dr.intro || "",
     lines: lines.map(l => ({ uid:l.uid, itemId:l.itemId, desc:l.desc.trim(), sub:(l.sub || "").trim(),
       unit:l.unit || "", qty:num(l.qty), price:num(l.price), discount:num(l.discount) })),
     vatRate: dr.vatRate || "", tcs: (dr.tcs || []).filter(t2 => t2.k || t2.v), words: !!dr.words,
     sign: dr.sign || "stamp", signDate: !!dr.signDate, qr: !!dr.qr, accred: !!dr.accred,
+    supSigner: buy ? dr.supSigner || "" : "", reqTitle: buy ? dr.reqTitle || "" : "", reqs: buy ? (dr.reqs || []) : [],
     updatedAt: now, updatedBy: who
   });
   save();
@@ -5004,8 +5212,8 @@ function docViewer(m) {
   const doc = docResolve(DOCUI.ref);
   if (!doc) { DOCUI.mode = "list"; return viewDocDesk(m); }
   const K = DOCKIND[doc.kind];
-  pageHead(m, `${K.title === "INVOICE" ? "Invoice" : "Quotation"} ${doc.ref}`,
-    `${(byId("customers", doc.customerId) || {}).nameEn || ""} · ${doc.date}`, [
+  pageHead(m, `${K.label} ${doc.ref}`,
+    `${(docParty(doc) || {}).nameEn || ""} · ${doc.date}`, [
     { label:"← All documents", on:() => { DOCUI.mode = "list"; render(); } },
     { label:t("edit"), disabled:!canEdit(), on:() => {
         DOCUI = Object.assign(DOCUI, { mode:"edit", isNew:false, draft: JSON.parse(JSON.stringify(doc)) }); render(); } },

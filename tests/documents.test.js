@@ -142,9 +142,73 @@ module.exports = { name: 'documents', run: async (ctx) => {
   const legacy = await A.evaluate(() => { const d = docResolve('INV-2026101901'); return d && [d.kind, d.lines.length, d.lines[0].desc, docTotalsOf(d).total]; });
   ctx.check('an invoice with no header is read from its transactions', legacy && legacy[0] === 'INVOICE' && legacy[1] === 1 &&
     legacy[2] === '2-Post Vehicle Lift 2.5 Ton' && legacy[3] === 280, JSON.stringify(legacy));
+  /* ---- the purchase side: a PO and an RFQ, addressed to a supplier ---- */
+  await A.evaluate(() => {
+    DB.suppliers.push({ id:'SUP-0006', uid:newUid(), nameEn:'Soham Engineering', contact:'Mr. Abubakr Mohammed',
+      address:'Khor Maksar, Aden', email:'commercial@soham-engineering.com' });
+    save();
+  });
+  const toList = () => A.evaluate(() => { DOCUI = Object.assign(DOCUI, { mode:'list', draft:null }); go('documents'); render(); });
+  await toList(); await settle(A, 600);
+  await A.locator('button:has-text("+ New PO")').click(); await settle(A);
+  const poRef = await A.inputValue('#docForm input[name="ref"]');
+  ctx.check('a new PO is numbered YYYYMMDD01, as the PO forms are', poRef === `${today}01`, poRef);
+  ctx.check('a PO asks for a supplier, not a customer',
+    await A.locator('#docForm select[name="supplierId"]').count() === 1 && await A.locator('#docForm select[name="customerId"]').count() === 0);
+  await A.selectOption('#docForm select[name="supplierId"]', 'SUP-0006'); await settle(A, 200);
+  const poTo = await A.inputValue('#docForm textarea[name="to"]');
+  ctx.check('choosing the supplier fills the TO block and who signs the acceptance',
+    /Soham Engineering/.test(poTo) && /Attn: Mr\. Abubakr Mohammed/.test(poTo) &&
+    (await A.inputValue('#docForm input[name="supSigner"]')) === 'Mr. Abubakr Mohammed', poTo);
+  await A.fill('tr[data-i="0"] [data-f="desc"]', '[006153] TRAC102.11R (Nalco)');
+  await A.fill('tr[data-i="0"] [data-f="sub"]', 'Water treatment chemical | 25 Kg / Can');
+  await A.fill('tr[data-i="0"] [data-f="unit"]', 'Kg');
+  await A.fill('tr[data-i="0"] [data-f="qty"]', '25');
+  await A.fill('tr[data-i="0"] [data-f="price"]', '12.19');
+  await A.fill('#docForm input[name="vatRate"]', '5');
+  await A.locator('#docForm button:has-text("Save and preview")').click(); await settle(A, 700);
+  const po = await A.evaluate(r => DB.transactions.filter(x => x.refNo === r).map(x => {
+    const it = byId('items', x.itemId);
+    return { type:x.type, supplierId:x.supplierId, customerId:x.customerId, debit:x.debit, credit:x.credit, amount:x.amount,
+             cost: it && it.costPrice, sale: it && it.salePrice };
+  }), poRef);
+  ctx.check('PO lines are PO OUT on the supplier, debit side, with the item at its cost price',
+    po.length === 1 && po[0].type === 'PO OUT' && po[0].supplierId === 'SUP-0006' && !po[0].customerId &&
+    po[0].debit === 304.75 && po[0].credit === 0 && po[0].cost === 12.19 && !po[0].sale, JSON.stringify(po));
+  let ptxt = await sheetText(A);
+  ctx.check('the PO prints with its own title, supplier and totals',
+    /PURCHASE/.test(ptxt) && /ORDER/.test(ptxt) && ptxt.includes('Soham Engineering') && /NET AMOUNT/.test(ptxt) &&
+    /USD 319\.99/.test(ptxt), ptxt.slice(0, 160));
+  ctx.check('every PO carries the supplier acceptance block',
+    /Supplier Acceptance/.test(ptxt) && /For Soham Engineering/.test(ptxt) && /Name: Mr\. Abubakr Mohammed/.test(ptxt) &&
+    /Signature & Stamp:/.test(ptxt) && /Invoice To:/.test(ptxt));
+  const poPdf = await A.pdf({ preferCSSPageSize: true, printBackground: true });
+  ctx.check('the PO prints on a single A4 page', pdfPages(poPdf) === 1, `${pdfPages(poPdf)} page(s)`);
+
+  await toList(); await settle(A, 500);
+  await A.locator('button:has-text("+ New RFQ")').click(); await settle(A);
+  const rfqRef = await A.inputValue('#docForm input[name="ref"]');
+  ctx.check('a new RFQ is numbered RFQ-YYYYMMDD01', rfqRef === `RFQ-${today}01`, rfqRef);
+  await A.selectOption('#docForm select[name="supplierId"]', 'SUP-0006'); await settle(A, 200);
+  await A.fill('tr[data-i="0"] [data-f="desc"]', 'Perkins genuine fuel filter');
+  await A.fill('tr[data-i="0"] [data-f="unit"]', 'Ea');
+  await A.fill('tr[data-i="0"] [data-f="qty"]', '4');
+  await A.fill('#docForm input[name="reqTitle"]', 'Technical Requirements:');
+  await A.fill('#docForm textarea[name="reqs"]', 'Genuine parts only\nPart numbers on the quotation');
+  await A.locator('#docForm button:has-text("Save and preview")').click(); await settle(A, 700);
+  const rq = await books(A, rfqRef);
+  ctx.check('an RFQ without prices is saved, one RFQ OUT per line', rq.length === 1 && rq[0].type === 'RFQ OUT' && rq[0].amount === 0, JSON.stringify(rq));
+  ptxt = await sheetText(A);
+  ctx.check('the RFQ leaves prices to the supplier and asks for what the quotation must include',
+    /REQUEST FOR/.test(ptxt) && /REMARKS/.test(ptxt) && /filled in by the supplier/.test(ptxt) &&
+    /Please include in your quotation:/.test(ptxt) && !/0\.00/.test(ptxt) && !/Supplier Acceptance/.test(ptxt), ptxt.slice(0, 160));
+  ctx.check('the numbered requirements are printed', /Technical Requirements:/.test(ptxt) && /2\. Part numbers on the quotation/.test(ptxt));
+  const rfqPdf = await A.pdf({ preferCSSPageSize: true, printBackground: true });
+  ctx.check('the RFQ prints on a single A4 page', pdfPages(rfqPdf) === 1, `${pdfPages(rfqPdf)} page(s)`);
+
   const listed = await A.evaluate(() => docList().map(d => d.ref));
   ctx.check('the list shows every invoice and quotation',
-    [ref1, qref, longRef, 'INV-2026101901'].every(r => listed.includes(r)), listed.join(', '));
+    [ref1, qref, longRef, 'INV-2026101901', poRef, rfqRef].every(r => listed.includes(r)), listed.join(', '));
 
   /* ---- the header travels to the other devices ---- */
   await sync(A); await settle(A, 600);
@@ -153,6 +217,9 @@ module.exports = { name: 'documents', run: async (ctx) => {
   const onB = await B.evaluate(r => { const d = docResolve(r); return d && { to:d.to, total:docTotalsOf(d).total, sign:d.sign }; }, qref);
   ctx.check('a document typed on one device prints the same on another',
     onB && onB.to.join('|').includes('UNHCR') && onB.total === 1100 && onB.sign === 'official', JSON.stringify(onB));
+  const poB = await B.evaluate(r => { const d = docResolve(r); return d && { kind:d.kind, sup:d.supplierId, signer:d.supSigner }; }, poRef);
+  ctx.check('a PO header reaches the other device too',
+    poB && poB.kind === 'PO' && poB.sup === 'SUP-0006' && poB.signer === 'Mr. Abubakr Mohammed', JSON.stringify(poB));
 
   ctx.check('no uncaught errors', !A.errors.length && !B.errors.length, A.errors.concat(B.errors).join(' | '));
   await A.ctx.close(); await B.ctx.close();

@@ -182,10 +182,10 @@ signatures.
 Defaults for terms, validity, delivery, VAT and the PAYMENT VIA bank details live
 in **System → Company profile**, so every new document starts correct.
 
-### Invoices & quotations — typed once, printed on the official form
+### Invoices, quotations, POs & RFQs — typed once, printed on the official form
 
-**Operations → Invoices & quotations** is where a customer invoice or a quotation
-is typed as one document and printed on the same official form as the PDFs the
+**Operations → Invoices, quotes, POs & RFQs** is where a customer invoice, a
+quotation, a purchase order or a request for quotation is typed as one document and printed on the same official form as the PDFs the
 office sends out (gold stripe, logo header, TO block, navy number/date box, items
 table, totals, Terms & Conditions, signature and stamp, navy footer).
 
@@ -206,6 +206,15 @@ table, totals, Terms & Conditions, signature and stamp, navy footer).
   ledger prints corrected. The words around it (addressee, terms, box headings)
   are the document's header, synced to every device as a `meta` record
   `doc:<number>`.
+- **+ New PO / + New RFQ** do the same on the purchase side, addressed to a
+  supplier: purchase orders are numbered `YYYYMMDDNN` and saved as `PO OUT`
+  lines, requests for quotation `RFQ-YYYYMMDDNN` as `RFQ OUT` lines. The PO
+  prints the purchase-order form (two-line title, SUBTOTAL / DISCOUNT / NET /
+  TAX RATE / VAT / TOTAL, Invoice To, our signature and stamp beside the
+  supplier's *Supplier Acceptance* block). An RFQ left without prices prints
+  blank price, total and REMARKS columns for the supplier to fill in, under
+  "Please include in your quotation:". Both can add a numbered section such as
+  *Calibration Requirements:*. Surcharges are typed as lines of their own.
 - **Print / PDF**, then *Save as PDF*. The page is A4 with no margins; the form's
   fonts (Arimo, the same widths as the PDFs' Helvetica), logos and QR code library
   ship with the app in `web/app/doc/`, so it prints the same offline and on every
