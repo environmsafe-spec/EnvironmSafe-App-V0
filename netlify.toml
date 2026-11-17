@@ -18,3 +18,5 @@
     X-Frame-Options = "SAMEORIGIN"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "geolocation=(), microphone=(), camera=()"
+    # a staff system: keep it, and every page and file under it, out of search engines
+    X-Robots-Tag = "noindex, nofollow, noarchive"
