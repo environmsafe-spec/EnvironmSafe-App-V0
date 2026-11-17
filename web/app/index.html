@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>EnvironmSafe — Procurement &amp; Finance</title>
 <style>
+  /* The official forms print in Arimo, drawn to the same widths as the Helvetica
+     of the PDF forms, and shipped with the app so every phone prints alike. */
+  @font-face { font-family:"ES Arimo"; src:url("doc/fonts/arimo-latin-400-normal.woff2") format("woff2"); font-weight:400; font-style:normal; }
+  @font-face { font-family:"ES Arimo"; src:url("doc/fonts/arimo-latin-700-normal.woff2") format("woff2"); font-weight:700; font-style:normal; }
+  @font-face { font-family:"ES Arimo"; src:url("doc/fonts/arimo-latin-400-italic.woff2") format("woff2"); font-weight:400; font-style:italic; }
   *, *::before, *::after { box-sizing: border-box; }
   body { margin: 0; }
 
@@ -139,6 +144,12 @@
     border:1px solid var(--line); border-radius:3px; padding:.45rem .5rem; width:100%; min-width:0;
   }
   textarea { resize:vertical; min-height:2.4rem; }
+  /* the line grid of the invoice / quotation form: wide enough to type in, and
+     scrolled sideways on a phone rather than squeezed */
+  .doclines { min-width:1000px; table-layout:fixed; }
+  .doclines input, .doclines select { width:100%; min-width:0; display:block; }
+  .doclines td { vertical-align:top; white-space:normal !important; }
+  .doclines .sub { margin-top:.25rem; font-style:italic; }
   .grid { display:grid; gap:.7rem; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
   .toolbar { display:flex; flex-wrap:wrap; gap:.5rem; align-items:end; margin-bottom:.9rem; }
   .toolbar .field { flex:1 1 150px; }
@@ -297,6 +308,7 @@
   <main id="main"></main>
 </div>
 
+<script src="doc/qrcode.js"></script>
 <script>
 "use strict";
 
@@ -493,6 +505,7 @@ const T = {
   r_asset:["Asset register & depreciation","سجل الأصول والإهلاك"], company:["Company profile","بيانات الشركة"],
   r_item:["Product & service report","تقرير المنتجات والخدمات"],
   r_document:["Official documents","المستندات الرسمية"],
+  documents:["Invoices & quotations","الفواتير وعروض الأسعار"],
   customers:["Customers","العملاء"], suppliers:["Suppliers","الموردون"],
   employees:["Employees","الموظفون"], projects:["Projects","المشاريع"],
   accounts:["Bank & cash","البنوك والنقد"], categories:["Expense categories","بنود المصروفات"],
@@ -1502,6 +1515,7 @@ const totalAP = () => rowsOf("suppliers").reduce((s,x) => s + supplierBalance(x.
 const NAV = [
   { group:"Operations", items:[
     { id:"dashboard", label:"dashboard" }, { id:"daily", label:"daily" },
+    { id:"documents", label:"documents" },
     { id:"ledger", label:"ledger" }, { id:"approvals", label:"approvals" },
     { id:"cases", label:"cases" } ] },
   { group:"Master data", items:[
@@ -1533,6 +1547,11 @@ function renderNav() {
       const b = el("a", { class:"navbtn", href:"#/" + it.id, "data-view":it.id,
                           "aria-current":String(VIEW === it.id) },
                    esc(t(it.label)) + (waiting ? ` <b class="pend-dot">${waiting}</b>` : ""));
+      // the menu entry always leads back to the list, even from inside a document
+      if (it.id === "documents") b.addEventListener("click", () => {
+        DOCUI.mode = "list"; DOCUI.draft = null;
+        if (VIEW === "documents") render();
+      });
       box.appendChild(b);
     });
     nav.appendChild(box);
@@ -1569,6 +1588,7 @@ function render() {
   const m = $("#main"); m.innerHTML = "";
   if (VIEW === "dashboard") viewDashboard(m);
   else if (VIEW === "daily") viewDaily(m);
+  else if (VIEW === "documents") viewDocDesk(m);
   else if (VIEW === "ledger") viewLedger(m);
   else if (VIEW === "approvals") viewApprovals(m);
   else if (VIEW === "history") viewHistory(m);
@@ -2075,8 +2095,8 @@ function fld(label, inner) {
    Android package with the whole thing frozen inside it — and they drift apart.
    "It is not working" and "you are running February's copy" look identical
    without this, so the build is stated where anyone can read it back. */
-const APP_VERSION = "1.23.0";
-const APP_BUILD   = "2026-09-24";
+const APP_VERSION = "1.24.0";
+const APP_BUILD   = "2026-11-17";
 const buildStamp  = () => `v${APP_VERSION} · ${APP_BUILD}`;
 
 const ADD_NEW = "__addnew__";
@@ -4074,6 +4094,12 @@ function repDocuments(m) {
   bEdit.onclick = () => editDocExtras(key);
   if (!canEdit()) bEdit.setAttribute("disabled", "");
   [bPrint, bXls, bEdit].forEach(b => bar.appendChild(b));
+  // invoices and quotations also have the official form, on their own screen
+  if (kindOfType(lines[0].type)) {
+    const bOff = el("button", { class:"btn gold sm" }, "Official form");
+    bOff.onclick = () => { DOCUI = Object.assign(DOCUI, { mode:"view", ref:key, draft:null }); go("documents"); };
+    bar.appendChild(bOff);
+  }
   m.appendChild(bar);
 
   m.appendChild(officialDoc(lines, key));
@@ -4197,6 +4223,798 @@ function officialDoc(lines, refNo) {
     </div>
     <div class="doc-note" style="text-align:center">${esc(c.footer || c.name)}</div>`;
   return box;
+}
+
+/* =========================================================================
+   Document desk — invoices and quotations typed in one go, printed on the
+   official form.
+
+   The office used to have these drawn up outside the system, one PDF at a time,
+   and then typed the same lines into the books a second time. Here the document
+   is the entry: its lines become INVOICE OUT / QUOTATION OUT transactions (one
+   per line, sharing the document number), a line that names something new
+   becomes a product/service record, and the printout is drawn to the same
+   measurements as the PDF form the customers already know.
+
+   What is not a line — who it is addressed to, terms, signature choice — is the
+   document's header, kept in DB.meta.docs under its number and synced as a
+   "meta" record "doc:<number>" so every device prints the same paper.
+   ========================================================================= */
+
+const DOCKIND = {
+  INVOICE:   { type:"INVOICE OUT",   prefix:"INV", title:"INVOICE",   docType:"Invoice",
+               noLabel:"INVOICE #",   word:"invoice" },
+  QUOTATION: { type:"QUOTATION OUT", prefix:"Q",   title:"QUOTATION", docType:"Quotation",
+               noLabel:"QUOTATION #", word:"quotation" }
+};
+const kindOfType = type => Object.keys(DOCKIND).find(k => DOCKIND[k].type === type) || "";
+
+/* The form's own words, exactly as the PDFs print them. They are the paper's
+   wording, not the editable company profile, so a profile edit cannot quietly
+   change a document customers already hold copies of. */
+const FORM_CO = {
+  brand: "EnvironmSafe",
+  lines: ["For Engineering, Trading, and Services Ltd", "Aden-Alburaqah / Sanaa-Alsafiah",
+          "(967) 773033186 - 783402932", "support@environmsafe.com  |  www.environmsafe.com"],
+  legal: "EnvironmSafe For Engineering, Trading, and Services Ltd",
+  band:  "EnvironmSafe For Engineering, Trading, and Services Ltd   |   www.environmsafe.com"
+};
+const ACCREDITED = ["leea", "nfpa", "cfps", "api510", "nebosh", "iosh"];
+
+let DOCUI = { mode:"list", ref:"", draft:null, q:"", isNew:false };
+
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+/** 2026-11-12 → 12-Nov-2026, as the meta box prints it. */
+const dmy = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ""); return m ? `${m[3]}-${MONTHS[+m[2] - 1]}-${m[1]}` : (d || ""); };
+/** 2026-11-12 → 12-11-2026, as the signature date prints it. */
+const dmyNum = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ""); return m ? `${m[3]}-${m[2]}-${m[1]}` : (d || ""); };
+const addDays = (d, n) => { const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+const money2 = v => num(v).toLocaleString("en-US", { minimumFractionDigits:2, maximumFractionDigits:2 });
+const qtyText = v => { const n = num(v); return Number.isInteger(n) ? String(n) : String(+n.toFixed(3)); };
+
+/* ---- amount in words ---- */
+const WORDS_CUR = {
+  USD: ["US Dollar", "US Dollars", "Cent", "Cents"],
+  SAR: ["Saudi Riyal", "Saudi Riyals", "Halala", "Halalas"],
+  YER: ["Yemeni Riyal", "Yemeni Riyals", "Fils", "Fils"],
+  AED: ["UAE Dirham", "UAE Dirhams", "Fils", "Fils"]
+};
+function numberWords(n) {
+  const ones = ["Zero","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven",
+    "Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
+  const tens = ["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
+  const under1000 = x => {
+    const out = [];
+    if (x >= 100) { out.push(ones[Math.floor(x / 100)] + " Hundred"); x %= 100; }
+    if (x >= 20) out.push(tens[Math.floor(x / 10)] + (x % 10 ? "-" + ones[x % 10] : ""));
+    else if (x > 0) out.push(ones[x]);
+    return out.join(" ");
+  };
+  n = Math.floor(n);
+  if (n === 0) return "Zero";
+  const scales = [[1e9, "Billion"], [1e6, "Million"], [1e3, "Thousand"]];
+  const out = [];
+  scales.forEach(([v, w]) => { if (n >= v) { out.push(under1000(Math.floor(n / v)) + " " + w); n %= v; } });
+  if (n) out.push(under1000(n));
+  return out.join(" ");
+}
+/** 11922.28 USD → "Eleven Thousand Nine Hundred Twenty-Two US Dollars and Twenty-Eight Cents only". */
+function amountInWords(v, cur) {
+  const c = WORDS_CUR[cur] || [cur, cur, "Cent", "Cents"];
+  const cents = Math.round(num(v) * 100), whole = Math.floor(cents / 100), frac = cents % 100;
+  let s = `${numberWords(whole)} ${whole === 1 ? c[0] : c[1]}`;
+  if (frac) s += ` and ${numberWords(frac)} ${frac === 1 ? c[2] : c[3]}`;
+  return s + " only";
+}
+
+/* ---- numbering ---- */
+/** The next free INV-/Q- number for that day: YYYYMMDD plus a two-digit sequence. */
+function docNextNumber(kind, date) {
+  const head = `${DOCKIND[kind].prefix}-${String(date || today()).replace(/-/g, "").slice(0, 8)}`;
+  const taken = new Set(DB.transactions.map(x => x.refNo).filter(Boolean)
+    .concat(Object.keys(DB.meta.docs || {})));
+  let n = 1;
+  taken.forEach(r => {
+    if (r.indexOf(head) === 0) { const m = /^(\d{2,})$/.exec(r.slice(head.length)); if (m) n = Math.max(n, +m[1] + 1); }
+  });
+  while (taken.has(head + String(n).padStart(2, "0"))) n++;
+  return head + String(n).padStart(2, "0");
+}
+
+/* ---- reading a document back ---- */
+const docLinesOf = (ref, type) => DB.transactions.filter(x => x.refNo === ref && (!type || x.type === type));
+const docHeader = ref => (DB.meta.docs || {})[ref] || null;
+
+/** A line as the document shows it, read from its transaction. */
+function lineFromTx(x) {
+  const it = byId("items", x.itemId);
+  return { uid:x.uid, itemId:x.itemId || "",
+    desc: (it && it.nameEn) || x.description || x.notes || x.type, sub:"",
+    unit: (it && it.unit) || "", qty: num(x.qty) || 1,
+    price: num(x.unitPrice) || rawAmount(x) + num(x.discount), discount: num(x.discount) };
+}
+
+/** Everything the printed form needs. The header supplies the words; the books
+    supply the money — an amount corrected in the ledger prints corrected here,
+    a line deleted there disappears here, a line added there appears here. */
+function docResolve(ref) {
+  const h = docHeader(ref) || {};
+  const kind = h.kind || kindOfType((docLinesOf(ref).find(x => kindOfType(x.type)) || {}).type);
+  if (!kind) return null;
+  const txl = docLinesOf(ref, DOCKIND[kind].type).slice().sort((a, b) => inOrder(a.id, b.id));
+  const head = txl[0] || {};
+  const lines = [];
+  const used = new Set();
+  (h.lines || []).forEach(ln => {
+    const x = ln.uid && txl.find(t2 => t2.uid === ln.uid);
+    if (ln.uid && !x) return;              // deleted in the books
+    if (x) {
+      used.add(x.uid);
+      lines.push(Object.assign({}, ln, { itemId:x.itemId || ln.itemId, qty:num(x.qty) || num(ln.qty),
+        price: num(x.unitPrice) || num(ln.price), discount:num(x.discount),
+        amount: rawAmount(x) }));
+    } else lines.push(Object.assign({}, ln));
+  });
+  txl.filter(x => !used.has(x.uid)).forEach(x => lines.push(Object.assign(lineFromTx(x), { amount:rawAmount(x) })));
+  lines.forEach(ln => { if (ln.amount == null) ln.amount = round2(num(ln.qty) * num(ln.price) - num(ln.discount)); });
+  const date = h.date || head.date || today();
+  const cust = byId("customers", h.customerId || head.customerId);
+  return Object.assign(docDefaults(kind, date, cust), h, {
+    ref, kind, date,
+    customerId: h.customerId || head.customerId || "",
+    projectId: h.projectId || head.projectId || "",
+    accountId: h.accountId != null ? h.accountId : (head.accountId || ""),
+    currency: h.currency || (txl.length ? txCurrency(head) : (CO().currency || "USD")),
+    fxRate: h.fxRate || head.fxRate || "",
+    lines
+  });
+}
+
+/** What a new document starts from: the last one of its kind (terms and bank
+    line), and the last one to the same customer (how they are addressed). */
+function docDefaults(kind, date, cust) {
+  const all = Object.values(DB.meta.docs || {}).filter(d => d && d.kind === kind && d.v)
+    .sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+  const last = all[0];
+  const lastCust = cust && all.find(d => d.customerId === cust.id);
+  const tcs = last && Array.isArray(last.tcs) ? last.tcs.map(t2 => ({ k:t2.k, v:t2.v }))
+    : kind === "INVOICE"
+      ? [{ k:"Reference", v:"" }, { k:"Bank", v:CO().docBank || "" }]
+      : [{ k:"Payment", v:"100% in advance." }, { k:"Validity", v:"This quotation is valid for 30 days from its date." },
+         { k:"Bank", v:CO().docBank || "" }];
+  return {
+    v:1, kind,
+    to: lastCust && Array.isArray(lastCust.to) ? lastCust.to.slice()
+      : cust ? [cust.nameEn || "", cust.contact ? "Attn: " + cust.contact : "", cust.address || ""].filter(Boolean) : [],
+    customerRef: lastCust ? lastCust.customerRef || "" : "",
+    l3: kind === "INVOICE" ? "REFERENCE" : "VALID UNTIL",
+    v3: kind === "INVOICE" ? "" : dmy(addDays(date, 30)),
+    l4: "TERMS",
+    v4: last ? last.v4 || "" : (kind === "INVOICE" ? "Due on receipt" : "100% in advance"),
+    intro: kind === "QUOTATION" ? "Dear Sir, further to your request, we are pleased to submit our offer as detailed below." : "",
+    tcs, words:true, vatRate:"", sign:"stamp", signDate:true,
+    qr: kind === "INVOICE", accred: kind === "QUOTATION"
+  };
+}
+
+function docTotalsOf(doc) {
+  const gross = round2(sum(doc.lines, l => round2(num(l.qty) * num(l.price))));
+  const discount = round2(sum(doc.lines, l => num(l.discount)));
+  const net = round2(gross - discount);
+  const rate = num(doc.vatRate);
+  const vat = rate > 0 ? round2(net * rate / 100) : 0;
+  return { gross, discount, net, rate, vat, total: round2(net + vat) };
+}
+
+/* =========================================================================
+   The printed form. Measurements are in points and copied from the PDF
+   generators (ReportLab, A4 = 595.28 × 841.89 pt, origin bottom-left), turned
+   over so they read from the top. The form is drawn in its own shadow root so
+   none of the app's screen or report-print styling can reach it.
+   ========================================================================= */
+
+const PG = { W:595.28, H:841.89, L:36 };
+PG.R = PG.W - 28; PG.CR = PG.R - 10; PG.CW = PG.CR - PG.L;
+/* Where the baseline of a line of Arimo sits below the top of a line box as
+   tall as its font size: (ascent − descent) / 2 + half the descent… measured,
+   0.8465 em. Lets a string be placed by its baseline, as ReportLab places it. */
+const BASE = 0.8465;
+
+const DOC_CSS = `
+:host { all: initial; display:block; }
+.sheetwrap { overflow:auto; background:#8a94a3; padding:12px; border-radius:6px; }
+.sheet { position:relative; width:210mm; min-height:calc(297mm - .25pt); overflow-x:clip; margin:0 auto; background:#fff;
+  box-shadow:0 2px 10px rgba(0,0,0,.35); font-family:"ES Arimo", Arimo, "Liberation Sans", Arial, Helvetica, sans-serif;
+  color:#555; -webkit-print-color-adjust:exact; print-color-adjust:exact; line-height:1; }
+.sheet * { box-sizing:border-box; }
+.stripe { position:absolute; left:0; top:0; bottom:0; width:8pt; background:#d9a21b; }
+.band { position:absolute; left:0; right:0; bottom:0; height:30pt; background:#14294a; }
+.band span { position:absolute; left:0; right:0; top:${18 - BASE * 7.5}pt; text-align:center; font-size:7.5pt;
+  line-height:7.5pt; color:#fff; white-space:pre; }
+.t { position:absolute; white-space:pre; }
+.logo { position:absolute; left:${PG.L + 6}pt; top:46pt; width:88pt; height:66pt; object-fit:contain; }
+.rule { position:absolute; left:${PG.L}pt; top:128pt; width:${290 - PG.L}pt; height:0; border-top:.6pt solid #c9d3df; }
+table { border-collapse:collapse; border-spacing:0; }
+.meta { position:absolute; left:330pt; top:138pt; width:${PG.CR - 330}pt; table-layout:fixed; }
+.meta td { width:50%; text-align:center; vertical-align:middle; font-size:8.5pt; padding:0;
+  border-bottom:.6pt solid #fff; }
+.meta .h td { background:#14294a; color:#fff; font-weight:bold; height:20pt; }
+.meta .v td { background:#e8edf3; color:#555; height:22pt; }
+.layout { width:100%; }
+.layout > * > tr > td { padding:0; }
+.layout > thead td { height:0; padding:0; }
+.layout > tfoot td { height:0; padding:0; }
+.body { padding:0 ${PG.W - PG.CR}pt 0 ${PG.L}pt; }
+.intro { font-size:8.6pt; line-height:11.5pt; color:#555; min-height:22pt; }
+.items { width:${PG.CW}pt; table-layout:fixed; }
+.items th:nth-child(2) { text-align:left; }
+.items th { background:#14294a; color:#fff; font-weight:bold; font-size:8.2pt; text-align:center;
+  vertical-align:middle; padding:0 6pt; line-height:9pt; }
+.items td { font-size:8.2pt; color:#555; text-align:center; vertical-align:middle; padding:2pt 6pt;
+  border:.5pt solid #c9d3df; line-height:1.15; }
+.items td.d { text-align:left; }
+.items td.n { text-align:right; }
+.items td.a { font-weight:bold; color:#14294a; }
+.items td.disc { color:#b3261e; }
+.items tr { break-inside:avoid; page-break-inside:avoid; }
+.d .m { color:#14294a; display:block; line-height:1.3; }
+.d .s { font-style:italic; color:#555; display:block; line-height:1.3; }
+.tot { width:200pt; margin-left:auto; table-layout:fixed; break-inside:avoid; }
+.tot td { width:50%; font-size:8.5pt; padding:0 6pt; vertical-align:middle; height:19pt; }
+.tot td:first-child { color:#555; }
+.tot td:last-child { text-align:right; color:#14294a; font-weight:bold; }
+.tot tr.l td { border-bottom:.5pt solid #c9d3df; }
+.tot tr.red td:last-child { color:#b3261e; }
+.tot tr.g td { background:#d9a21b; color:#fff; font-weight:bold; font-size:10pt; height:24pt; }
+.tch { font-size:10pt; line-height:10pt; font-weight:bold; color:#14294a; }
+.tc { font-size:8pt; line-height:10.5pt; color:#555; margin-top:2.5pt; }
+.tc b { color:#14294a; }
+.sig { position:relative; break-inside:avoid; }
+.sig .co { font-size:9.5pt; line-height:9.5pt; font-weight:bold; color:#14294a; }
+.sig .lab { font-size:8.5pt; line-height:8.5pt; color:#555; position:relative; }
+.sig .line { position:absolute; left:92pt; width:188pt; border-top:.8pt solid #14294a; }
+.sig img.stamp { position:absolute; left:100pt; width:165pt; height:${(165 * 267 / 387).toFixed(2)}pt; }
+.official { margin-top:22pt; background:#e8edf3; border:1pt solid #d9a21b; padding:8pt 10pt;
+  font-size:8.3pt; line-height:11pt; color:#555; break-inside:avoid; }
+.official b { color:#14294a; }
+.qr { position:absolute; bottom:42pt; width:62pt; height:62pt; }
+.qr svg { position:absolute; inset:0; width:62pt; height:62pt; }
+.qr .frame { position:absolute; left:-2pt; top:-2pt; width:66pt; height:66pt; border:.5pt solid #c9d3df; }
+.qrcap { position:absolute; }
+.qrcap b { position:absolute; left:0; white-space:pre; font-size:8pt; line-height:8pt; color:#14294a; }
+.qrcap span { position:absolute; left:0; white-space:pre; font-size:7pt; line-height:7pt; color:#555; }
+.acc { position:absolute; left:${PG.L}pt; width:${PG.CW}pt; bottom:40pt; height:42pt; display:flex;
+  justify-content:space-between; align-items:flex-end; }
+.acc img { height:42pt; width:auto; display:block; }
+.acclab { position:absolute; left:${PG.L}pt; bottom:${92 - (1 - BASE) * 9}pt; font-size:9pt; line-height:9pt;
+  font-weight:bold; color:#14294a; }
+.accrule { position:absolute; left:${PG.L + 52}pt; width:${PG.CR - PG.L - 52}pt; bottom:95pt; border-top:.6pt solid #c9d3df; }
+.warn { font:12px/1.4 sans-serif; color:#b3261e; background:#fff4f2; border:1px dashed #b3261e; padding:4px 8px;
+  margin:6px 0; }
+@media screen { .sheet { zoom:var(--z, 1); } }
+@media print {
+  .sheetwrap { padding:0; background:none; overflow:visible; border-radius:0; }
+  .sheet { box-shadow:none; margin:0; }
+  .stripe, .band { position:fixed; }
+  .layout > thead td { height:36pt; }
+  .body { padding-top:calc(var(--top) - 36pt) !important; }
+  .layout > tfoot td { height:40pt; }
+  .warn { display:none; }
+}`;
+
+/** A single line placed by its baseline, the way ReportLab's drawString does. */
+function ptText(x, base, text, size, opt = {}) {
+  const st = [`top:${(base - BASE * size).toFixed(2)}pt`, `font-size:${size}pt`, `line-height:${size}pt`,
+              `color:${opt.color || "#555"}`, opt.bold ? "font-weight:bold" : ""];
+  if (opt.align === "c") st.push(`left:${x}pt`, "transform:translateX(-50%)");
+  else if (opt.align === "r") st.push(`right:${(PG.W - x).toFixed(2)}pt`);
+  else st.push(`left:${x}pt`);
+  return `<div class="t" style="${st.filter(Boolean).join(";")}">${esc(text)}</div>`;
+}
+
+/** The QR as crisp squares; a 4-module quiet zone, as ReportLab's widget draws it. */
+function qrSvg(text) {
+  if (typeof qrcode !== "function") return "";
+  const q = qrcode(0, "M"); q.addData(text); q.make();
+  const n = q.getModuleCount(), m = n + 8;
+  let path = "";
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
+    if (q.isDark(r, c)) path += `M${c + 4} ${r + 4}h1v1h-1z`;
+  return `<svg viewBox="0 0 ${m} ${m}" shape-rendering="crispEdges"><path d="${path}" fill="#000"/></svg>`;
+}
+const VERIFY_URL = "https://www.environmsafe.com/verify?t=";
+
+function docSheetHtml(doc) {
+  const K = DOCKIND[doc.kind], isQ = doc.kind === "QUOTATION";
+  const tt = docTotalsOf(doc);
+  const cur = doc.currency || "USD";
+  const anyDisc = doc.lines.some(l => num(l.discount) > 0);
+  const top = isQ || doc.intro ? 240 : 238;
+
+  let h = `<div class="stripe"></div><div class="band"><span>${esc(FORM_CO.band)}</span></div>
+    <img class="logo" src="doc/es_logo.jpg" alt="">
+    ${ptText(245, 52, FORM_CO.brand, 17, { bold:true, color:"#14294a", align:"c" })}
+    ${FORM_CO.lines.map((s, i) => ptText(245, 66 + i * 11, s, 8.5, { align:"c" })).join("")}
+    ${ptText(PG.CR, 62, K.title, 20, { bold:true, color:"#d9a21b", align:"r" })}
+    <div class="rule"></div>
+    ${ptText(PG.L, 140, "TO:", 8, { bold:true, color:"#d9a21b" })}`;
+  const to = (doc.to || []).filter(s => String(s).trim());
+  if (doc.customerRef) to.push("Customer ID: " + doc.customerRef);
+  to.forEach((s, i) => { h += ptText(PG.L, 152 + i * 12, s, i ? 9 : 9.5, { bold:!i, color: i ? "#555" : "#14294a" }); });
+  h += `<table class="meta"><tbody>
+    <tr class="h"><td>${esc(K.noLabel)}</td><td>DATE</td></tr>
+    <tr class="v"><td>${esc(doc.ref)}</td><td>${esc(dmy(doc.date))}</td></tr>
+    <tr class="h"><td>${esc(doc.l3 || "")}</td><td>${esc(doc.l4 || "")}</td></tr>
+    <tr class="v"><td>${esc(doc.v3 || "")}</td><td>${esc(doc.v4 || "")}</td></tr></tbody></table>`;
+
+  /* items */
+  const cw = anyDisc ? [24, 196, 30, 26, 50, 54, 36, 58] : isQ ? [24, 236, 34, 28, 64, 66] : [24, 226, 36, 30, 66, 70];
+  cw.push(+(PG.CW - cw.reduce((a, b) => a + b, 0)).toFixed(2));
+  const heads = anyDisc ? ["SN", "DESCRIPTION", "UNIT", "QTY", "UNIT<br>PRICE", "AMOUNT", "DISC.", "NET<br>AMOUNT", "CUR."]
+                        : ["SN", "DESCRIPTION", "UNIT", "QTY", "UNIT PRICE", "AMOUNT", "CURRENCY"];
+  const rowH = isQ ? 40 : 28;
+  const mainSize = isQ ? 8.4 : 8.1, subSize = isQ ? 7.2 : 7;
+  const rows = doc.lines.map((l, i) => {
+    const gross = round2(num(l.qty) * num(l.price));
+    const d = `<td class="d"><span class="m" style="font-size:${mainSize}pt;${isQ ? "font-weight:bold" : ""}">${
+      esc(l.desc)}</span>${l.sub ? `<span class="s" style="font-size:${subSize}pt">${esc(l.sub)}</span>` : ""}</td>`;
+    const cells = anyDisc
+      ? [`<td>${i + 1}</td>`, d, `<td>${esc(l.unit)}</td>`, `<td>${qtyText(l.qty)}</td>`,
+         `<td class="n">${money2(l.price)}</td>`, `<td class="n">${money2(gross)}</td>`,
+         `<td class="disc">${num(l.discount) ? money2(l.discount) : ""}</td>`,
+         `<td class="n a">${money2(gross - num(l.discount))}</td>`, `<td>${esc(cur)}</td>`]
+      : [`<td>${i + 1}</td>`, d, `<td>${esc(l.unit)}</td>`, `<td>${qtyText(l.qty)}</td>`,
+         `<td class="n">${money2(l.price)}</td>`, `<td class="n a">${money2(gross)}</td>`, `<td>${esc(cur)}</td>`];
+    return `<tr style="height:${rowH}pt">${cells.join("")}</tr>`;
+  }).join("");
+
+  const totRows = [`<tr class="l"><td>SUBTOTAL</td><td>${money2(tt.gross)}</td></tr>`];
+  if (tt.discount) totRows.push(`<tr class="l red"><td>DISCOUNT</td><td>(${money2(tt.discount)})</td></tr>`);
+  totRows.push(tt.rate ? `<tr class="l"><td>VAT (${esc(String(tt.rate))}%)</td><td>${money2(tt.vat)}</td></tr>`
+                       : `<tr class="l"><td>TAX / VAT</td><td>Not applicable</td></tr>`);
+  totRows.push(`<tr class="g"><td>TOTAL</td><td>${esc(cur)} ${money2(tt.total)}</td></tr>`);
+
+  /* terms, with the amount in words placed before the bank line */
+  const tcs = (doc.tcs || []).filter(t2 => String(t2.v || "").trim()).map(t2 => ({ k:t2.k, v:t2.v }));
+  if (doc.words) {
+    const at = tcs.findIndex(t2 => /^bank/i.test(t2.k));
+    const w = { k:"Amount in words", v:amountInWords(tt.total, cur) };
+    at >= 0 ? tcs.splice(at, 0, w) : tcs.push(w);
+  }
+  const termsHtml = tcs.length ? `<div class="tch" style="margin-top:${(isQ ? 20 : 18) - BASE * 10}pt">Terms &amp; Conditions:</div>
+      <div style="height:${4 - (1 - BASE) * 10}pt"></div>
+      ${tcs.map(t2 => `<div class="tc"><b>${esc(t2.k)}:</b> ${esc(t2.v)}</div>`).join("")}` : "";
+
+  const hasQr = doc.kind === "INVOICE" && doc.qr && doc.token;
+  let sign = "";
+  if (doc.sign === "official") {
+    sign = `<div class="official"><b>OFFICIAL DOCUMENT:</b> This ${esc(K.word)} is officially issued by ${
+      esc(FORM_CO.legal)} from its system and is considered an official document. It is valid without a stamp or signature.${
+      hasQr ? " Scan the QR code below to confirm it is genuine." : ""}</div>`;
+  } else {
+    /* company line 24 pt below the terms, signature 20 pt below that, the stamp
+       drawn over the line with nothing reserved for it */
+    const gap = (isQ ? 26 : 24) - BASE * 9.5;
+    const stampSrc = doc.sign === "stamp" ? (CO().stamp || "") : "";
+    sign = `<div class="sig" style="margin-top:${gap.toFixed(2)}pt">
+      <div class="co">${esc(FORM_CO.legal)}</div>
+      <div class="lab" style="margin-top:${(20 - (1 - BASE) * 9.5 - BASE * 8.5).toFixed(2)}pt">Authorized Signature:
+        <div class="line" style="top:${(BASE * 8.5 + 2).toFixed(2)}pt"></div>
+        ${stampSrc ? `<img class="stamp" src="${stampSrc}" alt="" style="top:${(BASE * 8.5 - 43.83).toFixed(2)}pt">` : ""}
+      </div>
+      ${doc.signDate ? `<div class="lab" style="margin-top:${(18 - 8.5).toFixed(2)}pt">Date: ${esc(dmyNum(doc.signDate === true ? doc.date : doc.signDate))}</div>` : ""}
+    </div>${doc.sign === "stamp" && !stampSrc ? `<div class="warn">No signature &amp; stamp image yet — add it under System → Company profile. Nothing is printed in its place.</div>` : ""}`;
+  }
+
+  const reserve = doc.accred ? 108 : hasQr ? 40 : 0;
+  h += `<table class="layout"><thead><tr><td></td></tr></thead>
+    <tfoot><tr><td></td></tr></tfoot><tbody><tr><td><div class="body" style="--top:${top}pt;padding-top:${top}pt;padding-bottom:${reserve}pt">
+    ${doc.intro ? `<div class="intro">${esc(doc.intro)}</div>` : ""}
+    <table class="items"><colgroup>${cw.map(w => `<col style="width:${w}pt">`).join("")}</colgroup>
+      <thead><tr style="height:${anyDisc ? 26 : 24}pt">${heads.map(x => `<th>${x}</th>`).join("")}</tr></thead>
+      <tbody>${rows}</tbody></table>
+    <table class="tot" style="margin-top:6pt"><tbody>${totRows.join("")}</tbody></table>
+    ${termsHtml}
+    ${sign}
+    </div></td></tr></tbody></table>`;
+
+  if (hasQr) {
+    const x = PG.R - 236, size = 62;
+    h += `<div class="qr" style="left:${x}pt"><div class="frame"></div>${qrSvg(VERIFY_URL + doc.token)}</div>
+      <div class="qrcap" style="left:${x + size + 8}pt;bottom:${42}pt;height:${size}pt;width:150pt">
+        <b style="top:${(10 - BASE * 8).toFixed(2)}pt">Scan to verify this invoice</b>
+        ${["The page shows the real invoice number, date,", "customer and total from our system. If they",
+           "differ from this paper, it was not issued by us.", "www.environmsafe.com/verify  |  " + doc.ref]
+          .map((s, i) => `<span style="top:${(22 + i * 9 - BASE * 7).toFixed(2)}pt">${esc(s)}</span>`).join("")}
+      </div>`;
+  } else if (doc.kind === "INVOICE" && doc.qr) {
+    h += `<div class="warn" style="position:absolute;left:${PG.R - 236}pt;bottom:50pt;width:220pt">The verification QR
+      prints once the invoice is saved while signed in to the cloud account.</div>`;
+  }
+  if (doc.accred) {
+    h += `<div class="acclab">Accredited</div><div class="accrule"></div>
+      <div class="acc">${ACCREDITED.map(n => `<img src="doc/accreditation/${n}.jpg" alt="">`).join("")}</div>`;
+  }
+  return h;
+}
+
+/** The form in its own shadow root, sized to the screen; print shows it at A4. */
+function docSheet(doc) {
+  const host = el("div", { class:"docsheet-host" });
+  const root = host.attachShadow({ mode:"open" });
+  root.innerHTML = `<style>${DOC_CSS}</style><div class="sheetwrap"><div class="sheet">${docSheetHtml(doc)}</div></div>`;
+  const fit = () => {
+    const wrap = root.querySelector(".sheetwrap");
+    const avail = (wrap.clientWidth || host.clientWidth || 800) - 24;
+    const w = PG.W * 96 / 72;
+    root.querySelector(".sheet").style.setProperty("--z", String(Math.min(1, avail / w)));
+  };
+  host.fitSheet = fit;
+  requestAnimationFrame(fit);
+  /* A form longer than one page is made a whole number of pages tall, so the
+     QR and the accreditation strip land at the foot of the last page. */
+  requestAnimationFrame(() => {
+    const sheet = root.querySelector(".sheet");
+    const z = num(sheet.style.getPropertyValue("--z")) || 1;
+    const hpt = sheet.getBoundingClientRect().height / z * 72 / 96;
+    if (hpt > PG.H + 1) sheet.style.minHeight = (Math.ceil(hpt / PG.H) * PG.H - .25) + "pt";
+  });
+  return host;
+}
+
+window.addEventListener("resize", () => document.querySelectorAll(".docsheet-host")
+  .forEach(h => h.fitSheet && h.fitSheet()), { passive:true });
+
+/* =========================================================================
+   The screens: list, editor, preview.
+   ========================================================================= */
+
+function docList() {
+  const groups = {};
+  DB.transactions.forEach(x => {
+    const k = kindOfType(x.type);
+    if (!k || !x.refNo) return;
+    (groups[x.refNo] = groups[x.refNo] || { ref:x.refNo, kind:k, lines:[] }).lines.push(x);
+  });
+  return Object.values(groups).map(g => {
+    const h = docHeader(g.ref) || {};
+    const head = g.lines.slice().sort((a, b) => inOrder(a.id, b.id))[0];
+    const cust = byId("customers", h.customerId || head.customerId);
+    const statuses = [...new Set(g.lines.map(x => x.status).filter(Boolean))];
+    return { ref:g.ref, kind:g.kind, date:h.date || head.date, customer:cust ? cust.nameEn : "",
+             total: sum(g.lines, rawAmount), currency: txCurrency(head), status: statuses.join(", "),
+             official: !!h.v };
+  }).sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.ref).localeCompare(String(a.ref)));
+}
+
+function viewDocDesk(m) {
+  if (DOCUI.mode === "edit" && DOCUI.draft) return docEditor(m);
+  if (DOCUI.mode === "view" && DOCUI.ref) return docViewer(m);
+  pageHead(m, t("documents"), "Invoices and quotations: type them here, print them on the official form.", [
+    { label:"+ New invoice", cls:"gold", disabled:!canEdit(), on:() => docStart("INVOICE") },
+    { label:"+ New quotation", cls:"", disabled:!canEdit(), on:() => docStart("QUOTATION") }
+  ]);
+  const card = el("div", { class:"card" });
+  const bar = el("div", { class:"toolbar noprint" });
+  bar.appendChild(fld("Search | بحث", `<input type="search" id="docQ" value="${esc(DOCUI.q)}" placeholder="number, customer, date">`));
+  card.appendChild(bar);
+  const words = DOCUI.q.toLowerCase().split(/\s+/).filter(Boolean);
+  const list = docList().filter(d => words.every(w => `${d.ref} ${d.customer} ${d.date} ${d.kind}`.toLowerCase().includes(w)));
+  const wrap = el("div", { class:"tablewrap" });
+  wrap.innerHTML = `<table><thead><tr><th>Number</th><th>Kind</th><th>${esc(t("date"))}</th><th>Customer</th>
+    <th class="num">${esc(t("total"))}</th><th>${esc(t("currency"))}</th><th>${esc(t("status"))}</th><th></th></tr></thead>
+    <tbody>${list.slice(0, 300).map(d => `<tr>
+      <td><a href="#/documents" data-open="${esc(d.ref)}">${esc(d.ref)}</a></td>
+      <td>${d.kind === "INVOICE" ? "Invoice" : "Quotation"}</td><td>${esc(d.date || "")}</td>
+      <td>${esc(d.customer)}</td><td class="num">${fmt(d.total)}</td><td>${esc(d.currency)}</td>
+      <td>${esc(d.status)}</td>
+      <td class="noprint"><button class="btn sm" data-open="${esc(d.ref)}">Open</button></td></tr>`).join("") ||
+      `<tr><td colspan="8" class="empty">${esc(t("none"))}</td></tr>`}</tbody></table>`;
+  card.appendChild(wrap);
+  m.appendChild(card);
+  const q = card.querySelector("#docQ");
+  q.oninput = () => { DOCUI.q = q.value; const pos = q.selectionStart; render(); const q2 = $("#docQ"); if (q2) { q2.focus(); try { q2.setSelectionRange(pos, pos); } catch (e) {} } };
+  card.querySelectorAll("[data-open]").forEach(b => b.onclick = e => {
+    e.preventDefault(); DOCUI = Object.assign(DOCUI, { mode:"view", ref:b.dataset.open }); render(); window.scrollTo(0, 0);
+  });
+}
+
+function docStart(kind) {
+  if (!canEdit()) return toast("Your role is read-only.");
+  const date = today();
+  const lastAcc = kind === "INVOICE"
+    ? ((DB.transactions.slice().reverse().find(x => x.type === "INVOICE OUT" && x.accountId) || {}).accountId || "") : "";
+  DOCUI = { mode:"edit", isNew:true, ref:"", q:DOCUI.q,
+    draft: Object.assign(docDefaults(kind, date, null), {
+      ref: docNextNumber(kind, date), date, customerId:"", projectId:"", accountId:lastAcc,
+      currency: CO().currency === "YER" ? "USD" : (CO().currency || "USD"), fxRate:"",
+      lines:[{ uid:"", itemId:"", desc:"", sub:"", unit:"", qty:1, price:0, discount:0 }] }) };
+  render(); window.scrollTo(0, 0);
+}
+
+function docEditor(m) {
+  const dr = DOCUI.draft, K = DOCKIND[dr.kind];
+  pageHead(m, `${DOCUI.isNew ? "New" : "Edit"} ${K.word} ${dr.ref}`,
+    "Each line is saved as its own " + K.type + " transaction under this number.");
+  const card = el("div", { class:"card" });
+  const form = el("form", { id:"docForm", autocomplete:"off" });
+  const g = el("div", { class:"grid" });
+  g.appendChild(fld("Number | الرقم", `<input name="ref" value="${esc(dr.ref)}" ${DOCUI.isNew ? "" : "readonly"} required>`));
+  g.appendChild(fld("Date | التاريخ", `<input type="date" name="date" value="${esc(dr.date)}" required>`));
+  g.appendChild(fld("Customer | العميل", refSelect("customerId", "customers", dr.customerId)));
+  g.appendChild(fld("Project | المشروع", refSelect("projectId", "projects", dr.projectId)));
+  if (dr.kind === "INVOICE")
+    g.appendChild(fld("Receivable account | الحساب", refSelect("accountId", "accounts", dr.accountId)));
+  g.appendChild(fld("Currency | العملة", `<select name="currency">${CURRENCIES.map(c =>
+    `<option ${c === dr.currency ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>`));
+  g.appendChild(fld("Rate to USD | سعر الصرف", `<input type="number" step="0.0001" min="0" name="fxRate" value="${esc(dr.fxRate || "")}" placeholder="${esc(String(fxRate(dr.currency) || ""))}">`));
+  form.appendChild(g);
+
+  const g2 = el("div", { class:"grid" });
+  g2.appendChild(fld("To — one line each (first line printed bold) | إلى",
+    `<textarea name="to" rows="3">${esc((dr.to || []).join("\n"))}</textarea>`));
+  g2.appendChild(fld("Customer ID as printed | رقم العميل لديه", `<input name="customerRef" value="${esc(dr.customerRef || "")}">`));
+  g2.appendChild(fld("Box, left heading | عنوان", `<input name="l3" value="${esc(dr.l3 || "")}">`));
+  g2.appendChild(fld("Box, left text | النص", `<input name="v3" value="${esc(dr.v3 || "")}" placeholder="${dr.kind === "INVOICE" ? "e.g. PO142903" : ""}">`));
+  g2.appendChild(fld("Box, right heading | عنوان", `<input name="l4" value="${esc(dr.l4 || "")}">`));
+  g2.appendChild(fld("Box, right text | النص", `<input name="v4" value="${esc(dr.v4 || "")}">`));
+  form.appendChild(g2);
+  form.appendChild(fld("Opening sentence (optional) | مقدمة", `<textarea name="intro" rows="2">${esc(dr.intro || "")}</textarea>`));
+
+  /* lines */
+  const lw = el("div", { class:"tablewrap", style:"margin-top:.8rem" });
+  const itemOpts = val => refOptions("items", val, "item");
+  lw.innerHTML = `<table class="doclines"><colgroup><col style="width:2rem"><col style="width:10rem"><col style="width:22rem">
+    <col style="width:5.5rem"><col style="width:5.5rem"><col style="width:7rem"><col style="width:6rem"><col style="width:7rem"><col style="width:2.6rem"></colgroup>
+    <thead><tr><th>#</th><th>From the catalogue</th><th>Description · detail line</th>
+    <th>Unit</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Discount</th>
+    <th class="num">Amount</th><th></th></tr></thead><tbody>${dr.lines.map((l, i) => `<tr data-i="${i}">
+      <td>${i + 1}</td>
+      <td><select data-f="itemId" data-reftable="items" data-reflabel="item">${itemOpts(l.itemId)}</select></td>
+      <td><input data-f="desc" value="${esc(l.desc)}" placeholder="What is supplied">
+          <input data-f="sub" class="sub" value="${esc(l.sub || "")}" placeholder="Detail line (optional, printed in italics)"></td>
+      <td><input data-f="unit" value="${esc(l.unit || "")}"></td>
+      <td><input data-f="qty" type="number" step="0.001" min="0" value="${esc(String(l.qty))}"></td>
+      <td><input data-f="price" type="number" step="0.01" min="0" value="${esc(String(l.price))}"></td>
+      <td><input data-f="discount" type="number" step="0.01" min="0" value="${esc(String(l.discount || 0))}"></td>
+      <td class="num" data-amt>${fmt(round2(num(l.qty) * num(l.price) - num(l.discount)))}</td>
+      <td><button type="button" class="btn ghost sm" data-del="${i}" ${dr.lines.length < 2 ? "disabled" : ""}>✕</button></td>
+    </tr>`).join("")}</tbody></table>`;
+  form.appendChild(lw);
+  const addLine = el("button", { class:"btn ghost sm", type:"button", style:"margin-top:.4rem" }, "+ Add line");
+  form.appendChild(addLine);
+  const totBox = el("div", { class:"card-note", style:"margin-top:.5rem;font-weight:600" });
+  form.appendChild(totBox);
+
+  const g3 = el("div", { class:"grid", style:"margin-top:.8rem" });
+  g3.appendChild(fld("VAT % (blank = not applicable) | ضريبة", `<input type="number" step="0.01" min="0" name="vatRate" value="${esc(dr.vatRate || "")}">`));
+  g3.appendChild(fld("Signature | التوقيع", `<select name="sign">
+      <option value="stamp" ${dr.sign === "stamp" ? "selected" : ""}>Signature &amp; stamp</option>
+      <option value="official" ${dr.sign === "official" ? "selected" : ""}>OFFICIAL DOCUMENT box (no stamp)</option>
+      <option value="none" ${dr.sign === "none" ? "selected" : ""}>Blank line, signed by hand</option></select>`));
+  g3.appendChild(fld("Date under the signature | تاريخ التوقيع", `<select name="signDate">
+      <option value="yes" ${dr.signDate ? "selected" : ""}>Yes — the document date</option>
+      <option value="no" ${!dr.signDate ? "selected" : ""}>No</option></select>`));
+  g3.appendChild(fld("Amount in words | المبلغ كتابة", `<select name="words">
+      <option value="yes" ${dr.words ? "selected" : ""}>Print it</option><option value="no" ${!dr.words ? "selected" : ""}>Leave out</option></select>`));
+  if (dr.kind === "INVOICE")
+    g3.appendChild(fld("Verification QR | رمز التحقق", `<select name="qr">
+      <option value="yes" ${dr.qr ? "selected" : ""}>Print it</option><option value="no" ${!dr.qr ? "selected" : ""}>Leave out</option></select>`));
+  g3.appendChild(fld("Accreditation logos at the foot | شعارات الاعتماد", `<select name="accred">
+      <option value="yes" ${dr.accred ? "selected" : ""}>Print them</option><option value="no" ${!dr.accred ? "selected" : ""}>Leave out</option></select>`));
+  form.appendChild(g3);
+
+  /* terms & conditions */
+  const tw = el("div", { style:"margin-top:.8rem" });
+  tw.appendChild(el("h2", {}, "Terms &amp; Conditions"));
+  const tbody = el("div");
+  const termRow = (tc, i) => `<div class="tcrow" data-t="${i}" style="display:flex;gap:.4rem;margin:.25rem 0;flex-wrap:wrap">
+      <input data-tk value="${esc(tc.k)}" placeholder="Heading" style="width:9rem">
+      <input data-tv value="${esc(tc.v)}" placeholder="Text (left empty = not printed)" style="flex:1;min-width:14rem">
+      <button type="button" class="btn ghost sm" data-tdel="${i}">✕</button></div>`;
+  tbody.innerHTML = (dr.tcs || []).map(termRow).join("");
+  tw.appendChild(tbody);
+  const addTerm = el("button", { class:"btn ghost sm", type:"button" }, "+ Add term");
+  tw.appendChild(addTerm);
+  tw.appendChild(el("div", { class:"card-note" }, "The amount in words is added by itself, just before the Bank line."));
+  form.appendChild(tw);
+
+  const bar = el("div", { class:"actions", style:"display:flex;gap:.5rem;margin-top:1rem;flex-wrap:wrap" });
+  const bSave = el("button", { class:"btn gold", type:"submit" }, "Save and preview");
+  const bCancel = el("button", { class:"btn ghost", type:"button" }, t("cancel"));
+  if (!canEdit()) bSave.setAttribute("disabled", "");
+  bar.appendChild(bSave); bar.appendChild(bCancel);
+  form.appendChild(bar);
+  card.appendChild(form);
+  m.appendChild(card);
+
+  /* keep the draft in step with what is typed, so adding a line loses nothing */
+  const pull = () => {
+    const f = Object.fromEntries(new FormData(form).entries());
+    Object.keys(f).forEach(k => { if (f[k] === ADD_NEW) f[k] = ""; });
+    Object.assign(dr, {
+      ref: (f.ref || "").trim(), date: f.date, customerId: f.customerId || "", projectId: f.projectId || "",
+      accountId: f.accountId || "", currency: f.currency, fxRate: f.fxRate,
+      to: String(f.to || "").split("\n").map(s => s.trim()).filter(Boolean),
+      customerRef: (f.customerRef || "").trim(), l3:f.l3, v3:f.v3, l4:f.l4, v4:f.v4,
+      intro: (f.intro || "").trim(), vatRate: f.vatRate, sign: f.sign,
+      signDate: f.signDate === "yes", words: f.words === "yes",
+      qr: dr.kind === "INVOICE" ? f.qr === "yes" : false, accred: f.accred === "yes"
+    });
+    lw.querySelectorAll("tr[data-i]").forEach(tr => {
+      const l = dr.lines[+tr.dataset.i];
+      tr.querySelectorAll("[data-f]").forEach(inp => {
+        const v = inp.value === ADD_NEW ? "" : inp.value;
+        l[inp.dataset.f] = ["qty", "price", "discount"].includes(inp.dataset.f) ? num(v) : v;
+      });
+    });
+    dr.tcs = [...tbody.querySelectorAll(".tcrow")].map(r => ({
+      k: r.querySelector("[data-tk]").value.trim(), v: r.querySelector("[data-tv]").value.trim() }));
+  };
+  const showTotals = () => {
+    const tt = docTotalsOf(dr);
+    lw.querySelectorAll("tr[data-i]").forEach(tr => {
+      const l = dr.lines[+tr.dataset.i];
+      tr.querySelector("[data-amt]").textContent = fmt(round2(num(l.qty) * num(l.price) - num(l.discount)));
+    });
+    totBox.textContent = `Subtotal ${money2(tt.gross)}${tt.discount ? ` · discount ${money2(tt.discount)}` : ""}${
+      tt.rate ? ` · VAT ${money2(tt.vat)}` : ""} · Total ${dr.currency} ${money2(tt.total)}`;
+  };
+  form.addEventListener("input", () => { pull(); showTotals(); });
+  showTotals();
+
+  /* a new customer fills in who it is addressed to; an item fills its line */
+  form.customerId.addEventListener("change", () => {
+    const cu = byId("customers", form.customerId.value);
+    if (!cu) return;
+    const d2 = docDefaults(dr.kind, dr.date, cu);
+    form.to.value = d2.to.join("\n");
+    form.customerRef.value = d2.customerRef || "";
+    pull();
+  });
+  form.date.addEventListener("change", () => {
+    if (DOCUI.isNew) form.ref.value = docNextNumber(dr.kind, form.date.value);
+    if (dr.kind === "QUOTATION" && /^\d{2}-[A-Z][a-z]{2}-\d{4}$/.test(form.v3.value)) form.v3.value = dmy(addDays(form.date.value, 30));
+    pull();
+  });
+  form.currency.addEventListener("change", () => { form.fxRate.placeholder = String(fxRate(form.currency.value) || ""); pull(); showTotals(); });
+  lw.querySelectorAll('select[data-f="itemId"]').forEach(sel => sel.addEventListener("change", () => {
+    const it = byId("items", sel.value);
+    if (!it) return;
+    const tr = sel.closest("tr");
+    tr.querySelector('[data-f="desc"]').value = it.nameEn || "";
+    if (it.notes && !tr.querySelector('[data-f="sub"]').value) tr.querySelector('[data-f="sub"]').value = it.notes.split("\n")[0];
+    tr.querySelector('[data-f="unit"]').value = it.unit || "";
+    if (num(it.salePrice)) tr.querySelector('[data-f="price"]').value = num(it.salePrice);
+    pull(); showTotals();
+  }));
+  addLine.onclick = () => { pull(); dr.lines.push({ uid:"", itemId:"", desc:"", sub:"", unit:"", qty:1, price:0, discount:0 }); render(); };
+  lw.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { pull(); dr.lines.splice(+b.dataset.del, 1); render(); });
+  addTerm.onclick = () => { pull(); dr.tcs.push({ k:"", v:"" }); render(); };
+  tbody.querySelectorAll("[data-tdel]").forEach(b => b.onclick = () => { pull(); dr.tcs.splice(+b.dataset.tdel, 1); render(); });
+  bCancel.onclick = () => {
+    DOCUI = Object.assign(DOCUI, DOCUI.isNew ? { mode:"list", draft:null } : { mode:"view", draft:null });
+    render();
+  };
+  form.onsubmit = e => {
+    e.preventDefault(); pull();
+    const ref = docSave(dr, DOCUI.isNew);
+    if (!ref) return;
+    DOCUI = Object.assign(DOCUI, { mode:"view", ref, draft:null, isNew:false });
+    render(); window.scrollTo(0, 0);
+    docEnsureToken(ref);
+  };
+}
+
+/** Writes the document into the books. Returns its number, or "" with the reason shown. */
+function docSave(dr, isNew) {
+  if (!canEdit()) { toast("Your role is read-only."); return ""; }
+  const K = DOCKIND[dr.kind], ty = typeOf(K.type);
+  const ref = String(dr.ref || "").trim();
+  if (!ref) { toast("Give the document a number."); return ""; }
+  if (!dr.date) { toast("Enter the date."); return ""; }
+  if (!dr.customerId) { toast("Choose the customer."); return ""; }
+  const lines = dr.lines.filter(l => String(l.desc || "").trim() || num(l.price));
+  if (!lines.length) { toast("Add at least one line."); return ""; }
+  const bad = lines.findIndex(l => !String(l.desc || "").trim() || num(l.qty) <= 0);
+  if (bad >= 0) { toast(`Line ${bad + 1} needs a description and a quantity.`); return ""; }
+  if (lines.some(l => num(l.qty) * num(l.price) - num(l.discount) < 0)) { toast("A line's discount is larger than its amount."); return ""; }
+  if (isNew && (DB.transactions.some(x => x.refNo === ref) || docHeader(ref))) {
+    toast(`${ref} is already used. The next free number is ${docNextNumber(dr.kind, dr.date)}.`); return "";
+  }
+  if (isLocked(dr.date)) { toast(lockProblem(null, dr.date)); return ""; }
+  const old = docLinesOf(ref, K.type);
+  for (const x of old) { const p = lockProblem(x); if (p) { toast(p); return ""; } }
+
+  const now = new Date().toISOString();
+  const who = USER ? USER.username : "";
+  const keep = new Set();
+  const acc = byId("accounts", dr.accountId);
+  const cur = dr.currency || (acc && acc.currency) || CO().currency || "USD";
+  const fx = num(dr.fxRate) || fxRate(cur) || 0;
+  lines.forEach(l => {
+    let item = byId("items", l.itemId);
+    if (!item) {
+      item = { id: nextId("ITM"), uid: newUid(), code:"", nameEn: l.desc.trim(), nameAr:"",
+        kind:"Service", unit: l.unit || "", category:"", salePrice: num(l.price), costPrice:0,
+        isAsset:"No", lifeYears:"", currency: cur, notes: l.sub || "", createdAt:now, updatedAt:now };
+      DB.items.push(item);
+      noteChange("create", "items", item, [], item.nameEn);
+      l.itemId = item.id;
+    }
+    const amount = round2(num(l.qty) * num(l.price) - num(l.discount));
+    const text = l.desc.trim() + (l.sub ? " — " + l.sub.trim() : "");
+    const fields = { date: dr.date, type: K.type, phase: ty.phase, customerId: dr.customerId,
+      projectId: dr.projectId || "", accountId: dr.kind === "INVOICE" ? (dr.accountId || "") : "",
+      itemId: l.itemId, qty: num(l.qty), unitPrice: num(l.price), discount: num(l.discount),
+      currency: cur, fxRate: fx, debit: ty.side === "debit" ? amount : 0, credit: ty.side === "credit" ? amount : 0,
+      amount, refNo: ref, docType: K.docType, notes: text, description: text };
+    let tx = l.uid && old.find(x => x.uid === l.uid);
+    if (tx) {
+      const before = Object.assign({}, tx);
+      Object.assign(tx, fields, { updatedAt: now });
+      noteChange("change", "transactions", tx, fieldsChanged(before, tx), `${tx.type} ${fmt(rawAmount(tx))} ${txCurrency(tx)}`);
+    } else {
+      tx = Object.assign({ id: nextId("TRX"), uid: newUid(), caseNo:"", supplierId:"", employeeId:"",
+        categoryId:"", isAsset:"No", status: "Draft", againstRef:"", docRef:"", attachNote:"",
+        attachments:[], createdBy: who, createdAt: now, updatedAt: now }, fields);
+      DB.transactions.push(tx);
+      noteChange("create", "transactions", tx, [], `${tx.type} ${fmt(rawAmount(tx))} ${txCurrency(tx)}`);
+    }
+    l.uid = tx.uid; keep.add(tx.uid);
+  });
+  old.filter(x => !keep.has(x.uid)).forEach(x => {
+    noteChange("delete", "transactions", x, fieldsChanged(x, null), `${x.type} ${fmt(rawAmount(x))} ${txCurrency(x)}`);
+    DB.transactions = DB.transactions.filter(y => y !== x);
+  });
+  DB.meta.docs = DB.meta.docs || {};
+  const prev = DB.meta.docs[ref] || {};
+  DB.meta.docs[ref] = Object.assign({}, prev, {
+    v:1, kind: dr.kind, date: dr.date, customerId: dr.customerId, projectId: dr.projectId || "",
+    accountId: dr.accountId || "", currency: cur, fxRate: fx, to: dr.to || [], customerRef: dr.customerRef || "",
+    l3: dr.l3 || "", v3: dr.v3 || "", l4: dr.l4 || "", v4: dr.v4 || "", intro: dr.intro || "",
+    lines: lines.map(l => ({ uid:l.uid, itemId:l.itemId, desc:l.desc.trim(), sub:(l.sub || "").trim(),
+      unit:l.unit || "", qty:num(l.qty), price:num(l.price), discount:num(l.discount) })),
+    vatRate: dr.vatRate || "", tcs: (dr.tcs || []).filter(t2 => t2.k || t2.v), words: !!dr.words,
+    sign: dr.sign || "stamp", signDate: !!dr.signDate, qr: !!dr.qr, accred: !!dr.accred,
+    updatedAt: now, updatedBy: who
+  });
+  save();
+  toast(`Saved ${ref} · ${lines.length} line${lines.length === 1 ? "" : "s"} in the books`);
+  return ref;
+}
+
+/* The verification QR needs a token from the server, one per invoice number,
+   which the public verify page looks up. Asked for once and kept on the header. */
+async function docEnsureToken(ref) {
+  const h = docHeader(ref);
+  if (!h || h.kind !== "INVOICE" || !h.qr || h.token) return;
+  try {
+    if (typeof cloudSignedIn !== "function" || !cloudSignedIn() || !SYNC.companyId) return;
+    const tok = await cloudRest("/rpc/es_document_token", { method:"POST",
+      body: JSON.stringify({ p_company: SYNC.companyId, p_invoice_no: ref }) });
+    if (typeof tok === "string" && /^[A-Za-z0-9_-]{22,64}$/.test(tok)) {
+      h.token = tok; save();
+      if (VIEW === "documents" && DOCUI.mode === "view" && DOCUI.ref === ref) render();
+    }
+  } catch (e) { /* printed without the QR; the note on screen says why */ }
+}
+
+function docViewer(m) {
+  const doc = docResolve(DOCUI.ref);
+  if (!doc) { DOCUI.mode = "list"; return viewDocDesk(m); }
+  const K = DOCKIND[doc.kind];
+  pageHead(m, `${K.title === "INVOICE" ? "Invoice" : "Quotation"} ${doc.ref}`,
+    `${(byId("customers", doc.customerId) || {}).nameEn || ""} · ${doc.date}`, [
+    { label:"← All documents", on:() => { DOCUI.mode = "list"; render(); } },
+    { label:t("edit"), disabled:!canEdit(), on:() => {
+        DOCUI = Object.assign(DOCUI, { mode:"edit", isNew:false, draft: JSON.parse(JSON.stringify(doc)) }); render(); } },
+    { label:t("print"), cls:"gold", on:() => doPrint(doc.ref) }
+  ]);
+  /* the page box is A4 with no margin while this form is on screen, and only then */
+  m.appendChild(el("style", {}, "@page { size: A4; margin: 0; } @media print { #main > .page-head, .toast { display:none !important; } }"));
+  m.appendChild(docSheet(doc));
+  docEnsureToken(doc.ref);
 }
 
 function repSummary(m) {
@@ -4659,7 +5477,8 @@ const CO_FIELDS = [
   { k:"terms", l:"Default terms" },
   { k:"validity", l:"Default quotation validity" },
   { k:"delivery", l:"Default delivery note" },
-  { k:"vatRate", l:"Default VAT %" }
+  { k:"vatRate", l:"Default VAT %" },
+  { k:"docBank", l:"Bank line on invoices & quotations (Terms: Bank)" }
 ];
 const CO_TEXTAREAS = [
   { k:"payVia", l:"PAYMENT VIA — bank details printed on invoices" },
@@ -4733,6 +5552,31 @@ function viewCompany(m) {
   logoRow.appendChild(pick);
   form.appendChild(logoRow);
 
+  /* The signature & stamp printed on invoices and quotations. It lives with the
+     company's data, not in the app's source, which is a public repository. */
+  const stampRow = el("div", { style:"display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;margin-top:1rem" });
+  stampRow.innerHTML = c.stamp
+    ? `<img src="${c.stamp}" alt="Signature and stamp" style="height:80px;background:#fff;padding:.3rem;border:1px solid var(--line);border-radius:3px">`
+    : `<span class="card-note">No signature &amp; stamp image set — invoices and quotations print without it.</span>`;
+  const pickStamp = el("button", { class:"btn ghost sm", type:"button" }, c.stamp ? "Replace signature & stamp" : "Add signature & stamp (PNG)");
+  pickStamp.onclick = () => {
+    const inp = el("input", { type:"file", accept:"image/png,image/*" });
+    inp.onchange = () => {
+      const f = inp.files[0]; if (!f) return;
+      if (f.size > 400000) return toast("Please use an image under 400 KB.");
+      const rd = new FileReader();
+      rd.onload = () => {
+        DB.meta.company = Object.assign({}, DB.meta.company, { stamp:String(rd.result) });
+        noteChange("setting", "company", { id:"COMPANY" }, [{ f:"stamp", from:"", to:"(image)" }], "Signature & stamp");
+        save(); render(); toast("Signature & stamp saved");
+      };
+      rd.readAsDataURL(f);
+    };
+    inp.click();
+  };
+  stampRow.appendChild(pickStamp);
+  form.appendChild(stampRow);
+
   const btn = el("button", { class:"btn gold", type:"submit", style:"margin-top:1rem" }, t("save"));
   form.appendChild(btn);
   form.onsubmit = e => {
@@ -4759,7 +5603,7 @@ function viewCompany(m) {
     }
     DB.meta.company = Object.assign({}, DB.meta.company, vals);
     noteChange("setting", "company", { id:"COMPANY" },
-               fieldsChanged(wasCo, CO()).filter(c => c.f !== "logo"), "Company profile");
+               fieldsChanged(wasCo, CO()).filter(c => c.f !== "logo" && c.f !== "stamp"), "Company profile");
     save(); applyChrome(); render(); toast("Company profile saved");
   };
   card.appendChild(form);
@@ -5118,6 +5962,16 @@ function pendingChanges() {
     seen[k] = 1;
     if (SYNC.synced[k] !== h) changes.push({ collection:"meta", record_id:"company", data:co, deleted:false, _k:k, _h:h });
   }
+  // Each invoice / quotation header travels as its own record, "doc:<number>",
+  // so a document typed on one device prints the same on every other.
+  const docs = (DB.meta && DB.meta.docs) || {};
+  Object.keys(docs).forEach(ref => {
+    const d = docs[ref];
+    if (!d || typeof d !== "object") return;
+    const k = recKey("meta", "doc:" + ref), h = hashOf(d);
+    seen[k] = 1;
+    if (SYNC.synced[k] !== h) changes.push({ collection:"meta", record_id:"doc:" + ref, data:d, deleted:false, _k:k, _h:h });
+  });
   // Anything exchanged before and no longer here was deleted on this device.
   Object.keys(SYNC.synced).forEach(k => {
     if (seen[k]) return;
@@ -5221,6 +6075,14 @@ async function syncPull() {
     if (row.collection === "meta") {
       if (row.record_id === "company" && !row.deleted) {
         DB.meta.company = row.data; SYNC.synced[k] = hashOf(row.data); applied++;
+      }
+      if (String(row.record_id).indexOf("doc:") === 0) {
+        const ref = row.record_id.slice(4);
+        DB.meta.docs = DB.meta.docs || {};
+        if (row.deleted) { if (DB.meta.docs[ref]) { delete DB.meta.docs[ref]; applied++; } delete SYNC.synced[k]; }
+        else if (row.data && hashOf(DB.meta.docs[ref] || {}) !== hashOf(row.data)) {
+          DB.meta.docs[ref] = row.data; SYNC.synced[k] = hashOf(row.data); applied++;
+        } else SYNC.synced[k] = hashOf(row.data || {});
       }
       return;
     }

@@ -93,6 +93,14 @@ function startMockSupabase(port, opts) {
           return send(200, start);
         }
 
+        /* One verification token per invoice number, the same every time it is asked for. */
+        if (u.startsWith('/rest/v1/rpc/es_document_token')) {
+          if (req.method !== 'POST') return send(405, { message: 'method not allowed' });
+          if (!p.p_invoice_no) return send(400, { message: 'not an invoice number' });
+          srv.tokens = (srv.tokens || 0) + 1;
+          return send(200, ('t' + Buffer.from(String(p.p_invoice_no)).toString('hex')).padEnd(22, 'x').slice(0, 64));
+        }
+
         if (u.startsWith('/rest/v1/es_records')) {
           if (req.method === 'POST') {
             // The real table refuses any kind of record not on its list
